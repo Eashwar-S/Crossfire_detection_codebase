@@ -16,12 +16,17 @@ app = Flask(__name__, static_folder='.')
 frame_lock = threading.Lock()
 latest_ir_frame = None 
 latest_rgb_frame = None
+global status_message
 status_message = "System initialized."
 
 # ---------- Stream & FFmpeg backend ----------
 URL = "rtmp://192.168.200.55/live/ir"
 
 # --------- Flask http routes -----------
+@app.route('/status_text')
+def status_text():
+    return jsonify({"text": status_message})
+
 @app.route('/ir_feed')
 def ir_feed():
     return Response(_mjpeg_generator(lambda: latest_ir_frame),
@@ -35,11 +40,6 @@ def rgb_feed():
 @app.route('/')
 def index():
     return send_from_directory('.', 'index.html')
-
-@app.route('/status_text')
-def status_text():
-    global status_message
-    return jsonify({"text": status_message})
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>> ADDED: MQTT (integrated) <<<<<<<<<<<<<<<<<<<<<<<<<<
 import json, threading
@@ -422,7 +422,7 @@ def _get_yolo_boxes_dup(model: YOLO, frame_bgr: np.ndarray, imgsz: int, conf: fl
 
 # ---------- Main ----------
 def main():
-
+    global status_message
     ## making Flask variables global and starting Flask thread
     global latest_ir_frame, latest_rgb_frame
     def _start_flask_server():
@@ -536,7 +536,9 @@ def main():
         with frame_lock:
             latest_ir_frame = ir_anno.copy()
             latest_rgb_frame = rgb_anno.copy()
-        status_message = f"Frame updated at {time.strftime('%H:%M:%S')}"
+
+
+        # status_message = f"Frame updated at {time.strftime('%H:%M:%S')}"
 
         # Debug: show counts + whether LRF is ready
         print(f"Frame {frame_id}: IR boxes={len(ir_boxes_on_rgb)}, YOLO boxes={len(yolo_boxes)} | LRF ready={_latest['lrf_lat'] is not None}")
@@ -580,6 +582,10 @@ def main():
             idx += 1
 
         frame_id += 1
+        lrf_lat = _latest.get("lrf_lat")
+        lrf_lon = _latest.get("lrf_lon")
+        status_message = f"Coordinates: {lrf_lat} {lrf_lon}"
+
 
     cap.release()
     cv2.destroyAllWindows()

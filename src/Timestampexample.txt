@@ -1,0 +1,205 @@
+Timestamp: 2025-10-04T10:14:58.198000 | SN: None
+Telemetry | Lat: None, Lon: None, Height: None, Head: None, Pitch: None, Roll: None
+[FULL OSD PAYLOAD]
+{
+  "host": {
+    "99-0-0": {
+      "gimbal_pitch": 0,
+      "gimbal_roll": 0,
+      "gimbal_yaw": -43.75718677500605,
+      "measure_target_altitude": 22.399999618530273,
+      "measure_target_distance": 0,
+      "measure_target_error_state": 1,
+      "measure_target_latitude": 38.54933325214308,
+      "measure_target_longitude": -76.95371400364205,
+      "payload_index": "99-0-0",
+      "thermal_current_palette_style": 6,
+      "thermal_gain_mode": 2,
+      "thermal_global_temperature_max": 63.807212829589844,
+      "thermal_global_temperature_min": -13.8347225189209,
+      "thermal_isotherm_lower_limit": 95,
+      "thermal_isotherm_state": 1,
+      "thermal_isotherm_upper_limit": 150,
+      "thermal_supported_palette_styles": [
+        0,
+        1,
+        2,
+        3,
+        5,
+        6,
+        8,
+        11,
+        12,
+        13
+      ],
+      "zoom_factor": 0.9416403785488958
+    },
+    "activation_time": 1755030774,
+    "attitude_head": -43.5,
+    "attitude_pitch": 1.6,
+    "attitude_roll": -0.1,
+    "battery": {
+      "batteries": [
+        {
+          "capacity_percent": 92,
+          "firmware_version": "37.03.01.36",
+          "high_voltage_storage_days": 41,
+          "index": 0,
+          "loop_times": 48,
+          "sn": "87UPN26CA0004P",
+          "sub_type": 0,
+          "temperature": 31,
+          "type": 0,
+          "voltage": 24513
+        }
+      ],
+      "capacity_percent": 92,
+      "landing_power": 0,
+      "remain_flight_time": 0,
+      "remain_job_time": 65535,
+      "return_home_power": 0
+    },
+    "best_link_gateway": "7CACMB7001022L",
+    "cameras": [
+      {
+        "camera_mode": 0,
+        "ir_metering_mode": 0,
+        "ir_metering_point": {
+          "temperature": 49.55101776123047,
+          "x": 0.3500538766384125,
+          "y": 0.20646320283412933
+        },
+        "ir_zoom_factor": 2,
+        "liveview_world_region": {
+          "bottom": 0.7463948130607605,
+          "left": 0.2518131732940674,
+          "right": 0.7538961172103882,
+          "top": 0.2473641335964203
+        },
+        "payload_index": "99-0-0",
+        "photo_state": 0,
+        "photo_storage_settings": [
+          "current",
+          "vision",
+          "ir"
+        ],
+        "record_time": 0,
+        "recording_state": 0,
+        "remain_photo_num": 5884,
+        "remain_record_duration": 0,
+        "screen_split_enable": true,
+        "wide_calibrate_farthest_focus_value": 35,
+        "wide_calibrate_nearest_focus_value": 65,
+        "wide_exposure_mode": 1,
+        "wide_exposure_value": 16,
+        "wide_focus_mode": 2,
+        "wide_focus_state": 0,
+        "wide_focus_value": 65,
+        "wide_iso": 4,
+        "wide_max_focus_value": 98,
+        "wide_min_focus_value": 0,
+        "wide_shutter_speed": 1,
+        "zoom_calibrate_farthest_focus_value": 35,
+        "zoom_calibrate_nearest_focus_value": 65,
+        "zoom_exposure_mode": 1,
+        "zoom_exposure_value": 16,
+        "zoom_factor": 1.6869565217391305,
+        "zoom_focus_mode": 2,
+        "zoom_focus_state": 0,
+        "zoom_focus_value": 65,
+        "zoom_iso": 4,
+        "zoom_max_focus_value": 98,
+        "zoom_min_focus_value": 0,
+        "zoom_shutter_speed": 1
+      }
+    ],
+    "country": "US",
+    "distance_limit_status": {
+      "distance_limit": 5000,
+      "is_near_distance_limit": 0,
+      "state": 0
+    },
+    "elevation": 0,
+    "fts_info": {
+      "fts_firmware_version": "",
+      "fts_sn": "",
+      "fts_status": 65535,
+      "fts_timestamp": 0,
+      "fts_valid_duration": 0,
+      "fts_verification_code": ""
+    },
+    "gear": 1,
+    "height": 22.432918548583984,
+    "height_limit": 120,
+    "home_distance": 1.7796707153320312,
+    "horizontal_speed": 0,
+    "is_near_area_limit": 0,
+    "is_near_height_limit": 0,
+    "latitude": 38.54933326901278,
+    "longitude": -76.9537141026513,
+    "maintain_status": {
+      "maintain_status_array": [
+        {
+          "last_maintain_flight_sorties": 0,
+          "last_maintain_flight_time": 0,
+          "last_maintain_time": 0,
+          "last_maintain_type": 1,
+          "state": 0
+        },
+        {
+          "last_maintain_flight_sorties": 0,
+          "last_maintain_flight_time": 0,
+          "last_maintain_time": 0,
+          "last_maintain_type": 2,
+          "state": 0
+        },
+        {
+          "last_maintain_flight_sorties": 0,
+          "last_maintain_flight_time": 0,
+          "last_maintain_time": 0,
+          "last_maintain_type": 3,
+          "state": 0
+        }
+      ]
+    },
+    "mode_code": 0,
+    "night_lights_state": 0,
+    "obstacle_avoidance": {
+      "downside": 1,
+      "horizon": 1,
+      "upside": 1
+    },
+    "position_state": {
+      "gps_number": 23,
+      "is_fixed": 0,
+      "quality": 5,
+      "rtk_number": 28
+    },
+    "rc_lost_action": 2,
+    "rid_state": true,
+    "rth_altitude": 60,
+    "storage": {
+      "total": 60382000,
+      "used": 20994000
+    },
+    "total_flight_distance": 15151.465846043197,
+    "total_flight_sorties": 22,
+    "total_flight_time": 6275.039859741926,
+    "track_id": "",
+    "vertical_speed": 0,
+    "wind_direction": 0,
+    "wind_speed": 0
+  },
+  "sn": "1581F8HGX252F00A00XT"
+}
+^CTraceback (most recent call last):
+  File "/home/edge/djicloud2/dji-cloud-platform-minimal-main/dji-cloud-platform-minimal-main/mqtt_client.py", line 107, in <module>
+    start_mqtt(True)
+  File "/home/edge/djicloud2/dji-cloud-platform-minimal-main/dji-cloud-platform-minimal-main/mqtt_client.py", line 100, in start_mqtt
+    c.loop_forever()
+  File "/home/edge/.local/lib/python3.10/site-packages/paho/mqtt/client.py", line 2297, in loop_forever
+    rc = self._loop(timeout)
+  File "/home/edge/.local/lib/python3.10/site-packages/paho/mqtt/client.py", line 1663, in _loop
+    socklist = select.select(rlist, wlist, [], timeout)
+KeyboardInterrupt
+
