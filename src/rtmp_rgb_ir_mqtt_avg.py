@@ -508,94 +508,64 @@ def main():
     frame_id = 0
 
     while True:
-        # for _ in range(max(0, args.skip)):
-        #     if not cap.grab():
-        #         break        
-
-
-        # if not ok or frame is None:
-        #     cap.release()
-        #     time.sleep(0.05)
-        #     cap = open_cap(args.url)
-        #     frame = wait_for_first_frame(cap, timeout_s=0.8)
-        #     if frame is None:
-        #         continue
-
-
-
-        # for _ in range(2):
-        #     if not cap.grab():
-        #         break
-        # ok2, latest = cap.retrieve()
-        # if ok2 and latest is not None:
-        #     frame = latest
-
-
-        # Newly added part
-        ok, frame = cap.read()
-
+        # Read frame from RTMP
         ok, frame = cap.read()
         if not ok or frame is None:
             time.sleep(0.01)
             continue
-        #end of new part
 
-
+        # Split composite frame into IR and RGB
         ir_left, rgb_right = split_halves(frame)
 
-        # IR detection (mask + boxes)
+        # ---------- IR detection ----------
         ir_mask = ir_hsv_mask(ir_left, hsv_lo, hsv_hi)
         ir_anno = draw_boxes_from_mask(ir_left.copy(), ir_mask, args.ir_min_area)
 
-        # Map IR mask onto RGB geometry to look for overlaps with YOLO (heuristic)
+        # Map IR mask onto RGB space for overlap heuristic
         rgb_h, rgb_w = rgb_right.shape[:2]
         ir_mask_on_rgb = cv2.resize(ir_mask, (rgb_w, rgb_h), interpolation=cv2.INTER_NEAREST)
         ir_boxes_on_rgb = _boxes_from_mask(ir_mask_on_rgb, args.ir_min_area)
 
-        # RGB YOLO detection
-        rgb_anno = run_yolo(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
-                            classes=args.classes, rect=args.rect, device=args.device)
-        yolo_boxes = _get_yolo_boxes(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
-                                     classes=args.classes, rect=args.rect, device=args.device)
+        # ---------- Conditional YOLO ----------
+        if len(ir_boxes_on_rgb) > 0:  # IR threshold met
+            rgb_anno = run_yolo(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
+                                classes=args.classes, rect=args.rect, device=args.device)
+            yolo_boxes = _get_yolo_boxes(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
+                                            classes=args.classes, rect=args.rect, device=args.device)
 
-        # Updating Flask images sent to http server
+            # Check intersection for logging
+            has_intersection = False
+            for ib in ir_boxes_on_rgb:
+                for yb in yolo_boxes:
+                    if _intersects(ib, yb):
+                        has_intersection = True
+                        break
+                if has_intersection:
+                    break
+
+            if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None:
+                print(f"----> INTERSECTION + LRF target at frame {frame_id} -> logging to detections.txt")
+                _log_detection(frame_id)
+                avg = _update_running_average(_latest["lrf_lat"], _latest["lrf_lon"])
+                if avg is not None:
+                    _log_avg(frame_id, avg[0], avg[1])
+                wavg = _update_weighted_average(_latest["lrf_lat"], _latest["lrf_lon"], yolo_boxes, rgb_w, rgb_h)
+                if wavg is not None:
+                    _log_wavg(frame_id, wavg[0], wavg[1])
+        else:
+            # IR threshold not met → skip YOLO, send raw RGB
+            rgb_anno = rgb_right.copy()
+            yolo_boxes = []
+
+        # ---------- Update Flask streams ----------
         with frame_lock:
             latest_ir_frame = ir_anno.copy()
             latest_rgb_frame = rgb_anno.copy()
 
-
-        # status_message = f"Frame updated at {time.strftime('%H:%M:%S')}"
-
-        # Debug: show counts + whether LRF is ready
+        # Debug print
         print(f"Frame {frame_id}: IR boxes={len(ir_boxes_on_rgb)}, YOLO boxes={len(yolo_boxes)} | LRF ready={_latest['lrf_lat'] is not None}")
 
-        # Require overlap AND an LRF target to log
-        has_intersection = False
-        for ib in ir_boxes_on_rgb:
-            for yb in yolo_boxes:
-                if _intersects(ib, yb):
-                    has_intersection = True
-                    break
-            if has_intersection:
-                break
-
-        if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None:
-            print(f"----> INTERSECTION + LRF target at frame {frame_id} -> logging to detections.txt")
-            _log_detection(frame_id)
-            avg = _update_running_average(_latest["lrf_lat"], _latest["lrf_lon"])
-            if avg is not None:
-                _log_avg(frame_id, avg[0], avg[1])
-            wavg = _update_weighted_average(_latest["lrf_lat"], _latest["lrf_lon"], yolo_boxes, rgb_w, rgb_h)
-            if wavg is not None:
-                _log_wavg(frame_id, wavg[0], wavg[1])
-
-        now = time.time()
-        if now - last_info > 1.0:
-            last_info = now
-
-        # cv2.imshow("IR (annotated)", ir_anno)
-        # cv2.imshow("RGB (YOLO)", rgb_anno)
-
+        # ---------- Save frames on keypress ----------
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q') or key == 27:
             break
@@ -614,7 +584,6 @@ def main():
 
 
     cap.release()
-    cv2.destroyAllWindows()
 
 if __name__ == "__main__":
     main()
