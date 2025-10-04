@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <meta charset="UTF-8">
+  <title>Equal Video Feeds with Console</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: monospace;
+      height: 100vh;
+      overflow: hidden; /* no page scroll */
+    }
+
+    /* video container fills space above console */
+    .container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 15vh; /* leave space for console */
+      display: flex;
+    }
+
+    .feed {
+      flex: 1 1 50%; /* exactly half of container */
+      display: fixed;
+      align-items: center;
+      justify-content: center;
+      background: black; /* so letterbox/pillarbox shows as black */
+      position: relative;
+    }
+
+    .label {
+      position: absolute;
+      top: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 14px;
+      background: rgba(0,0,0,0.5);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* console fixed to bottom */
+    .console {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 15vh;
+      min-height: 60px;
+      background: #111;
+      padding: 5px;
+      overflow-y: auto;
+      resize: vertical;
+      border-top: 3px solid #555;
+      box-sizing: border-box;
+    }
+
+    .mini {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 120px;
+      height: 90px;
+      border: 2px solid white;
+      cursor: pointer;
+      z-index: 10;
+      background: black;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+  .mini img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* or 'contain' if you want full image visible */
+  }
+
+  </style>
+</head>
+<body>
+
+<div class="container" id="feed-container">
+  <div class="feed" id="map-feed" style="display:none;">
+    <div class="label">MAP feed</div>
+    <div id="map" style="width:100%; height:100%;"></div>
+  </div>  
+
+  <div class="mini" id="mini-map" onclick="showMap()">
+    <!-- Will become a mini Leaflet map later -->
+  </div>
+
+  <div class="feed" id="rgb-feed">
+    <div class="label">RGB feed</div>
+    <img id="rgb-img" src="/rgb_feed" alt="RGB feed" />
+  </div>
+
+  <div class="feed" id="ir-feed">
+    <div class="label">IR feed</div>
+    <img id="ir-img" src="/ir_feed" alt="IR feed" />
+  </div>
+</div>
+
+<div class="console" id="console"></div>
+
+<script>
+  // DOM refs
+  const feedContainer = document.getElementById("feed-container");
+  const rgbFeed = document.getElementById("rgb-feed");
+  const irFeed = document.getElementById("ir-feed");
+  const mini = document.getElementById("mini-map");
+  const mapFeed = document.getElementById("map-feed");
+
+  // Leaflet objects
+  let miniMap = null;
+  let mainMap = null;
+  let droneMarker = null;
+  let targetMarker = null;
+  let trackLine = null;
+  let trackLatLngs = [];
+
+  // --- ICON helper (simple SVG arrow for heading) ---
+  function droneIconHtml(heading) {
+    const svg = `
+      <svg viewBox="-12 -12 24 24" width="24" height="24" xmlns="http://www.w3.org/2000/svg">
+        <g transform="rotate(${heading || 0})">
+          <path d="M0 -8 L4 6 L0 3 L-4 6 Z" fill="#00ff66" stroke="#003300" stroke-width="0.4"/>
+        </g>
+      </svg>`;
+    return L.divIcon({ className: 'drone-icon', html: svg, iconSize: [24, 24], iconAnchor: [12, 12] });
+  }
+
+  // --- Initialize the mini map (small preview in top-left) ---
+  function initMiniMap(center = [38.9897, -76.9378], zoom = 13) {
+    if (miniMap) return;
+    mini.innerHTML = "";
+    const div = document.createElement("div");
+    div.style.width = "100%";
+    div.style.height = "100%";
+    mini.appendChild(div);
+
+    miniMap = L.map(div, {
+      zoomControl: false,
+      attributionControl: false,
+      dragging: false,
+      scrollWheelZoom: false,
+      doubleClickZoom: false,
+      boxZoom: false
+    }).setView(center, zoom);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(miniMap);
+  }
+
+  // --- Initialize the main map (large view) ---
+  function initMainMap(center = [38.9897, -76.9378], zoom = 13) {
+    if (mainMap) return;
+    mainMap = L.map('map', { zoomControl: true }).setView(center, zoom);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mainMap);
+
+    // create markers & track
+    droneMarker = L.marker(center, { icon: droneIconHtml(0) }).addTo(mainMap);
+    targetMarker = L.marker(center, {
+      icon: L.divIcon({
+        className: '',
+        html: '<div style="width:10px;height:10px;border-radius:50%;background:red;border:1px solid #800"></div>',
+        iconSize: [10, 10],
+        iconAnchor: [5, 5]
+      })
+    }).addTo(mainMap);
+
+    trackLine = L.polyline([], { color: 'yellow', weight: 3, opacity: 0.9 }).addTo(mainMap);
+  }
+
+  // --- Called when position data arrives: update markers & track ---
+  function updateMapFromPosition(pos) {
+    if (!pos) return;
+
+    const lat = pos.air_lat;
+    const lon = pos.air_lon;
+    const heading = pos.heading;
+    const lrf_lat = pos.lrf_lat;
+    const lrf_lon = pos.lrf_lon;
+
+    if (lat != null && lon != null) {
+      const latlng = [lat, lon];
+
+      // push to track (keep memory reasonable if you want, slice array)
+      trackLatLngs.push(latlng);
+      if (trackLatLngs.length > 200) trackLatLngs.shift();
+
+      // main map updates
+      if (mainMap && droneMarker) {
+        droneMarker.setLatLng(latlng);
+        droneMarker.setIcon(droneIconHtml(heading || 0));
+        trackLine.setLatLngs(trackLatLngs);
+      }
+
+      // mini map updates (if present)
+      if (miniMap) {
+        // add a simple small marker on mini map (create once)
+        if (!mini._drone) {
+          mini._drone = L.marker(latlng, {
+            icon: L.divIcon({
+              className: '',
+              html: '<div style="width:8px;height:8px;border-radius:50%;background:#7fff7f;border:1px solid #033"></div>',
+              iconSize: [8, 8],
+              iconAnchor: [4, 4]
+            })
+          }).addTo(miniMap);
+        } else {
+          mini._drone.setLatLng(latlng);
+        }
+      }
+    }
+
+    if (lrf_lat != null && lrf_lon != null && targetMarker) {
+      targetMarker.setLatLng([lrf_lat, lrf_lon]);
+    }
+  }
+
+  // --- UI switching helpers (keeps your "mini is preview of the other page") ---
+  function showMap() {
+    // hide video feeds
+    irFeed.style.display = "none";
+    rgbFeed.style.display = "none";
+
+    // show map feed full width
+    mapFeed.style.display = "flex";
+    mapFeed.style.flex = "1 1 100%";
+
+    // create main map if needed and update size
+    initMainMap();
+    setTimeout(() => mainMap.invalidateSize && mainMap.invalidateSize(), 200);
+
+    // mini should show a preview (RGB by default when on map)
+    showMiniImage("/rgb_feed");
+  }
+
+  function showDual() {
+    // hide map
+    mapFeed.style.display = "none";
+
+    // show both video feeds
+    irFeed.style.display = "flex";
+    rgbFeed.style.display = "flex";
+    rgbFeed.style.flex = "1 1 50%";
+    irFeed.style.flex = "1 1 50%";
+
+    // show mini map preview (mini shows map while on dual)
+    initMiniMap();
+    showMiniMap();
+  }
+
+  // mini image placeholder when on map view
+  function showMiniImage(src) {
+    mini.innerHTML = "";
+    const img = document.createElement("img");
+    img.src = src;
+    img.style.width = "100%";
+    img.style.height = "100%";
+    img.style.objectFit = "cover";
+    mini.appendChild(img);
+
+    // clicking the mini should bring you back to the dual (video) view
+    mini.onclick = showDual;
+  }
+
+  // show the mini Leaflet map (used when you are in dual (rgb/ir) mode)
+  function showMiniMap() {
+    // init (no-op if already created)
+    initMiniMap();
+    // clicking mini opens main map
+    mini.onclick = showMap;
+  }
+
+  // --- Start page in RGB/IR mode, show mini map preview ---
+  initMiniMap();
+  showMiniMap();
+
+  // --- Poll /status_text every second and update console + map ---
+  let lastText = "";
+  async function fetchStatusAndUpdate() {
+    try {
+      const res = await fetch("/status_text", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+
+      // console text (existing behavior)
+      const text = data.text || "";
+      if (text !== lastText) {
+        const line = document.createElement("div");
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+        document.getElementById("console").appendChild(line);
+        document.getElementById("console").scrollTop = document.getElementById("console").scrollHeight;
+        lastText = text;
+      }
+
+      // position -> update maps
+      if (data.position) {
+        updateMapFromPosition(data.position);
+      }
+    } catch (err) {
+      // silent fail — keep polling
+    }
+  }
+
+  setInterval(fetchStatusAndUpdate, 1000);
+  fetchStatusAndUpdate(); // initial
+</script>
+
+<script>
+  let lastPosition = null;
+
+  async function fetchMapPosition() {
+    try {
+      const res = await fetch("/position_data");
+      if (!res.ok) return;
+
+      const data = await res.json(); 
+      const pos = data.position; // e.g., { lat: 38.986, lon: -76.944 }
+
+      if (pos && (!lastPosition || pos.lat !== lastPosition.lat || pos.lon !== lastPosition.lon)) {
+        updateMapFromPosition(pos);
+        lastPosition = pos;
+      }
+    } catch (err) {
+      console.warn("⚠️ Map position fetch failed", err);
+    }
+  }
+
+  // Poll map separately
+  setInterval(fetchMapPosition, 1000);
+  fetchMapPosition();
+</script>
+
+<script>
+  const consoleDiv = document.getElementById("console");
+
+  function logToConsole(text) {
+    const line = document.createElement("div");
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+    consoleDiv.appendChild(line);
+    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+  }
+
+  let lastConsoleText = "";
+
+  async function fetchConsoleStatus() {
+    try {
+      const response = await fetch("/status_text");
+      if (!response.ok) return;
+
+      const data = await response.json();
+      const currentText = data.text;
+
+      if (currentText && currentText !== lastConsoleText) {
+        logToConsole(currentText);
+        lastConsoleText = currentText;
+      }
+    } catch (err) {
+      logToConsole("No console to log");
+    }
+  }
+
+  // Poll every 1 second
+  setInterval(fetchConsoleStatus, 1000);
+  fetchConsoleStatus(); // initial call
+</script>
+
+
+</body>
+</html>
