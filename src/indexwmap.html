@@ -188,7 +188,7 @@
     rgbFeed.style.display = "none";
     mapFeed.style.display = "flex";
     mapFeed.style.flex = "1 1 100%";
-    initMainMap();
+    // initMainMap();
     setTimeout(() => mainMap.invalidateSize && mainMap.invalidateSize(), 200);
     showMiniImage("/rgb_feed");
   }
@@ -200,6 +200,7 @@
     rgbFeed.style.flex = "1 1 50%";
     irFeed.style.flex = "1 1 50%";
     initMiniMap();
+    initMainMap([38.5493213, -76.9537231], 15); 
     showMiniMap();
   }
 
