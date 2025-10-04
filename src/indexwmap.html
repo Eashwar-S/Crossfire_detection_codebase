@@ -203,7 +203,6 @@
 
       // mini map updates (if present)
       if (miniMap) {
-        // add a simple small marker on mini map (create once)
         if (!mini._drone) {
           mini._drone = L.marker(latlng, {
             icon: L.divIcon({
@@ -224,40 +223,27 @@
     }
   }
 
-  // --- UI switching helpers (keeps your "mini is preview of the other page") ---
+  // --- UI switching helpers ---
   function showMap() {
-    // hide video feeds
     irFeed.style.display = "none";
     rgbFeed.style.display = "none";
-
-    // show map feed full width
     mapFeed.style.display = "flex";
     mapFeed.style.flex = "1 1 100%";
-
-    // create main map if needed and update size
     initMainMap();
     setTimeout(() => mainMap.invalidateSize && mainMap.invalidateSize(), 200);
-
-    // mini should show a preview (RGB by default when on map)
     showMiniImage("/rgb_feed");
   }
 
   function showDual() {
-    // hide map
     mapFeed.style.display = "none";
-
-    // show both video feeds
     irFeed.style.display = "flex";
     rgbFeed.style.display = "flex";
     rgbFeed.style.flex = "1 1 50%";
     irFeed.style.flex = "1 1 50%";
-
-    // show mini map preview (mini shows map while on dual)
     initMiniMap();
     showMiniMap();
   }
 
-  // mini image placeholder when on map view
   function showMiniImage(src) {
     mini.innerHTML = "";
     const img = document.createElement("img");
@@ -266,52 +252,16 @@
     img.style.height = "100%";
     img.style.objectFit = "cover";
     mini.appendChild(img);
-
-    // clicking the mini should bring you back to the dual (video) view
     mini.onclick = showDual;
   }
 
-  // show the mini Leaflet map (used when you are in dual (rgb/ir) mode)
   function showMiniMap() {
-    // init (no-op if already created)
     initMiniMap();
-    // clicking mini opens main map
     mini.onclick = showMap;
   }
 
-  // --- Start page in RGB/IR mode, show mini map preview ---
   initMiniMap();
   showMiniMap();
-
-  // --- Poll /status_text every second and update console + map ---
-  let lastText = "";
-  async function fetchStatusAndUpdate() {
-    try {
-      const res = await fetch("/status_text", { cache: "no-store" });
-      if (!res.ok) return;
-      const data = await res.json();
-
-      // console text (existing behavior)
-      const text = data.text || "";
-      if (text !== lastText) {
-        const line = document.createElement("div");
-        line.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
-        document.getElementById("console").appendChild(line);
-        document.getElementById("console").scrollTop = document.getElementById("console").scrollHeight;
-        lastText = text;
-      }
-
-      // position -> update maps
-      if (data.position) {
-        updateMapFromPosition(data.position);
-      }
-    } catch (err) {
-      // silent fail — keep polling
-    }
-  }
-
-  setInterval(fetchStatusAndUpdate, 1000);
-  fetchStatusAndUpdate(); // initial
 </script>
 
 <script>
@@ -323,8 +273,7 @@
       if (!res.ok) return;
 
       const data = await res.json(); 
-      const pos = data.position; // e.g., { lat: 38.986, lon: -76.944 }
-
+      const pos = data.position;
       if (pos && (!lastPosition || pos.lat !== lastPosition.lat || pos.lon !== lastPosition.lon)) {
         updateMapFromPosition(pos);
         lastPosition = pos;
@@ -334,7 +283,6 @@
     }
   }
 
-  // Poll map separately
   setInterval(fetchMapPosition, 1000);
   fetchMapPosition();
 </script>
@@ -368,11 +316,9 @@
     }
   }
 
-  // Poll every 1 second
   setInterval(fetchConsoleStatus, 1000);
-  fetchConsoleStatus(); // initial call
+  fetchConsoleStatus();
 </script>
-
 
 </body>
 </html>
