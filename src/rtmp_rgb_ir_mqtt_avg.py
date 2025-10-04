@@ -735,66 +735,70 @@ def main():
         ir_mask = ir_hsv_mask(ir_left, hsv_lo, hsv_hi)
         ir_anno, detected = draw_boxes_from_mask(ir_left.copy(), ir_mask, args.ir_min_area)
 
-        if not detected:
-            continue
+        detections = False
+        if detected:  
 
-        # Map IR mask onto RGB geometry to look for overlaps with YOLO (heuristic)
-        rgb_h, rgb_w = rgb_right.shape[:2]
-        ir_mask_on_rgb = cv2.resize(ir_mask, (rgb_w, rgb_h), interpolation=cv2.INTER_NEAREST)
-        ir_boxes_on_rgb = _boxes_from_mask(ir_mask_on_rgb, args.ir_min_area)
+            # Map IR mask onto RGB geometry to look for overlaps with YOLO (heuristic)
+            rgb_h, rgb_w = rgb_right.shape[:2]
+            ir_mask_on_rgb = cv2.resize(ir_mask, (rgb_w, rgb_h), interpolation=cv2.INTER_NEAREST)
+            ir_boxes_on_rgb = _boxes_from_mask(ir_mask_on_rgb, args.ir_min_area)
 
-        # RGB YOLO detection
-        rgb_anno = run_yolo(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
-                            classes=args.classes, rect=args.rect, device=args.device)
-        yolo_boxes = _get_yolo_boxes(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
-                                     classes=args.classes, rect=args.rect, device=args.device)
+            # RGB YOLO detection
+            rgb_anno = run_yolo(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
+                                classes=args.classes, rect=args.rect, device=args.device)
+            yolo_boxes = _get_yolo_boxes(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
+                                        classes=args.classes, rect=args.rect, device=args.device)
 
-        # Debug: show counts + whether LRF is ready
-        print(f"Frame {frame_id}: IR boxes={len(ir_boxes_on_rgb)}, YOLO boxes={len(yolo_boxes)} | LRF ready={_latest['lrf_lat'] is not None}")
+            # Debug: show counts + whether LRF is ready
+            print(f"Frame {frame_id}: IR boxes={len(ir_boxes_on_rgb)}, YOLO boxes={len(yolo_boxes)} | LRF ready={_latest['lrf_lat'] is not None}")
 
-        # Require overlap AND an LRF target to log
-        has_intersection = False
-        first_matching_yolo_box = None
-        for ib in ir_boxes_on_rgb:
-            for yb in yolo_boxes:
-                if _intersects(ib, yb):
-                    has_intersection = True
-                    first_matching_yolo_box = yb
+            # Require overlap AND an LRF target to log
+            has_intersection = False
+            first_matching_yolo_box = None
+            for ib in ir_boxes_on_rgb:
+                for yb in yolo_boxes:
+                    if _intersects(ib, yb):
+                        has_intersection = True
+                        first_matching_yolo_box = yb
+                        break
+                if has_intersection:
                     break
-            if has_intersection:
-                break
 
-        if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None:
-            print(f"----> INTERSECTION + LRF target at frame {frame_id} -> logging to detections.txt")
-            # REPLACED CALL: use the richer logger that includes bbox in detections.txt
-            _log_detection_with_bbox(frame_id, first_matching_yolo_box)
+            if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None:
+                print(f"----> INTERSECTION + LRF target at frame {frame_id} -> logging to detections.txt")
+                # REPLACED CALL: use the richer logger that includes bbox in detections.txt
+                _log_detection_with_bbox(frame_id, first_matching_yolo_box)
 
-            avg = _update_running_average(_latest["lrf_lat"], _latest["lrf_lon"])
-            if avg is not None:
-                _log_avg(frame_id, avg[0], avg[1])
-            wavg = _update_weighted_average(_latest["lrf_lat"], _latest["lrf_lon"], yolo_boxes, rgb_w, rgb_h)
-            if wavg is not None:
-                _log_wavg(frame_id, wavg[0], wavg[1])
+                avg = _update_running_average(_latest["lrf_lat"], _latest["lrf_lon"])
+                if avg is not None:
+                    _log_avg(frame_id, avg[0], avg[1])
+                wavg = _update_weighted_average(_latest["lrf_lat"], _latest["lrf_lon"], yolo_boxes, rgb_w, rgb_h)
+                if wavg is not None:
+                    _log_wavg(frame_id, wavg[0], wavg[1])
 
-            # bbox -> geo estimate & logging (unchanged)
-            if first_matching_yolo_box is not None:
-                est = _estimate_bbox_centroid_geo(first_matching_yolo_box, rgb_w, rgb_h,
-                                                  args.hfov_deg, args.vfov_deg)
-                if est is not None:
-                    est_lat, est_lon, cx, cy = est
-                    _log_bbox(frame_id, est_lat, est_lon, cx, cy)
-                    _accum_bbox_avg(est_lat, est_lon)
-                    # draw a marker on RGB preview
-                    cv2.circle(rgb_anno, (int(cx), int(cy)), 6, (0,255,0), 2)
-                    cv2.putText(rgb_anno, f"{est_lat:.6f},{est_lon:.6f}",
-                                (int(cx)+8, int(cy)-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2, cv2.LINE_AA)
-
+                # bbox -> geo estimate & logging (unchanged)
+                if first_matching_yolo_box is not None:
+                    est = _estimate_bbox_centroid_geo(first_matching_yolo_box, rgb_w, rgb_h,
+                                                    args.hfov_deg, args.vfov_deg)
+                    if est is not None:
+                        est_lat, est_lon, cx, cy = est
+                        _log_bbox(frame_id, est_lat, est_lon, cx, cy)
+                        _accum_bbox_avg(est_lat, est_lon)
+                        # draw a marker on RGB preview
+                        cv2.circle(rgb_anno, (int(cx), int(cy)), 6, (0,255,0), 2)
+                        cv2.putText(rgb_anno, f"{est_lat:.6f},{est_lon:.6f}",
+                                    (int(cx)+8, int(cy)-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2, cv2.LINE_AA)
+                        detections = True
+                        cv2.imshow("RGB (YOLO)", rgb_anno)
         now = time.time()
         if now - last_info > 1.0:
             last_info = now
 
         cv2.imshow("IR (annotated)", ir_anno)
-        cv2.imshow("RGB (YOLO)", rgb_anno)
+        if not detections:
+            cv2.imshow("RGB (YOLO)", rgb_right)
+            # detections = False
+        
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q') or key == 27:
