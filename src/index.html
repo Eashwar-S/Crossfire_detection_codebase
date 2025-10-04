@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Equal Video Feeds with Console</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      color: white;
+      font-family: monospace;
+      height: 100vh;
+      overflow: hidden; /* no page scroll */
+    }
+
+    /* video container fills space above console */
+    .container {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 15vh; /* leave space for console */
+      display: flex;
+    }
+
+    .feed {
+      flex: 1 1 50%; /* exactly half of container */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: black; /* so letterbox/pillarbox shows as black */
+      position: relative;
+    }
+
+    .label {
+      position: absolute;
+      top: 5px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 14px;
+      background: rgba(0,0,0,0.5);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    /* console fixed to bottom */
+    .console {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 15vh;
+      min-height: 60px;
+      background: #111;
+      padding: 5px;
+      overflow-y: auto;
+      resize: vertical;
+      border-top: 3px solid #555;
+      box-sizing: border-box;
+    }
+
+    .mini {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      width: 120px;
+      height: 90px;
+      border: 2px solid white;
+      cursor: pointer;
+      z-index: 10;
+      background: black;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+  </style>
+</head>
+<body>
+
+<div class="container" id="feed-container">
+  <!-- Mini preview temproary IR -->
+  <div class="mini" onclick="showMap()">
+    <img id="mini-img" src="/ir_feed" /> 
+  </div>
+
+  <div class="feed" id="rgb-feed">
+    <div class="label">RGB feed</div>
+    <img id="rgb-img" src="/rgb_feed" alt="RGB feed" />
+  </div>
+
+  <div class="feed" id="ir-feed">
+    <div class="label">IR feed</div>
+    <img id="ir-img" src="/ir_feed" alt="IR feed" />
+  </div>
+</div>
+
+<div class="console" id="console"></div>
+
+<script>
+  const feedContainer = document.getElementById("feed-container");
+  const rgbFeed = document.getElementById("rgb-feed");
+  const irFeed = document.getElementById("ir-feed");
+  const mini = feedContainer.querySelector(".mini");
+
+  function showMap() {
+    irFeed.style.display = "none";
+    rgbFeed.style.flex = "1 1 100%";
+    rgbFeed.querySelector(".label").innerText = "MAP feed";
+    rgbFeed.querySelector("img").src = "/ir_feed"; // temporary ir
+    mini.onclick = showDual;
+  }
+
+  function showDual() {
+    irFeed.style.display = "flex";
+    rgbFeed.style.flex = "1 1 50%";
+    irFeed.style.flex = "1 1 50%";
+    rgbFeed.querySelector(".label").innerText = "RGB feed";
+    irFeed.querySelector(".label").innerText = "IR feed";
+    rgbFeed.querySelector("img").src = "/rgb_feed";
+    irFeed.querySelector("img").src = "/ir_feed";
+    mini.onclick = showMap;
+  }
+
+  function log(msg) {
+    const c = document.getElementById("console");
+    c.innerHTML += msg + "<br>";
+    c.scrollTop = c.scrollHeight;
+  }
+  setInterval(() => log("System log " + Date.now()), 2000);
+</script>
+
+</body>
+</html>
