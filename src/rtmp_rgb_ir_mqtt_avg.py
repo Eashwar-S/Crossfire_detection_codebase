@@ -29,12 +29,23 @@ _latest = {
     "ts": None,                # milliseconds (if provided) or None
     "air_lat": None, "air_lon": None, "air_h": None,
     "head": None, "pitch": None, "roll": None,
-    "lrf_lat": None, "lrf_lon": None, "lrf_alt": None, "lrf_dist": None
+    "lrf_lat": None, "lrf_lon": None, "lrf_alt": None, "lrf_dist": None,
+    # >>>>>>>>>>>>>>> ADDED: store gimbal yaw/pitch if present <<<<<<<<<<<<<<<<
+    "gimbal_yaw": None, "gimbal_pitch": None
 }
 
 _DETECTIONS_LOG = "detections.txt"
 _AVG_LOG        = "detections_avg.txt"
 _WAVG_LOG       = "detections_wavg.txt"
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>> ADDED: BBOX GEO logs & accumulators <<<<<<<<<<<<<<
+_DETECTIONS_BBOX_LOG = "detections_bbox.txt"
+_bbox_avg = {"n": 0, "sum_lat": 0.0, "sum_lon": 0.0}
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+# ---------- NEW: clustered outputs ----------
+_CLUSTERED_AVG_LOG  = "detections_avg_clustered.txt"
+_CLUSTERED_WAVG_LOG = "detections_wavg_clustered.txt"
 
 # Running aggregates (for LRF target)
 _avg_acc  = {"n": 0, "sum_lat": 0.0, "sum_lon": 0.0}
@@ -86,16 +97,21 @@ def _extract_from_osd_message(m: dict):
 
     # LRF block: under host there can be payload-indexed dicts such as "99-0-0"
     lrf_lat = lrf_lon = lrf_alt = lrf_dist = None
+    # >>>>>>>>>>>>>>> ADDED: try capture gimbal_yaw/gimbal_pitch <<<<<<<<<<<<<<
+    gimbal_yaw = gimbal_pitch = None
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
     for k, v in host.items():
         if not isinstance(v, dict):
             continue
         # Look for measure_target_* keys
         if "measure_target_latitude" in v or "measure_target_distance" in v:
-            lrf_lat = _maybe_float(v.get("measure_target_latitude"))
-            lrf_lon = _maybe_float(v.get("measure_target_longitude"))
-            lrf_alt = _maybe_float(v.get("measure_target_altitude"))
+            lrf_lat  = _maybe_float(v.get("measure_target_latitude"))
+            lrf_lon  = _maybe_float(v.get("measure_target_longitude"))
+            lrf_alt  = _maybe_float(v.get("measure_target_altitude"))
             lrf_dist = _maybe_float(v.get("measure_target_distance"))
-            # Prefer first block that contains these; break
+            # ADDED: gimbal angles (deg)
+            gimbal_yaw   = _maybe_float(v.get("gimbal_yaw"))
+            gimbal_pitch = _maybe_float(v.get("gimbal_pitch"))
             break
 
     # Update cache
@@ -111,6 +127,10 @@ def _extract_from_osd_message(m: dict):
     _latest["lrf_lon"]  = lrf_lon  if lrf_lon  is not None else _latest["lrf_lon"]
     _latest["lrf_alt"]  = lrf_alt  if lrf_alt  is not None else _latest["lrf_alt"]
     _latest["lrf_dist"] = lrf_dist if lrf_dist is not None else _latest["lrf_dist"]
+
+    # ADDED: save gimbal angles if available
+    _latest["gimbal_yaw"]   = gimbal_yaw   if gimbal_yaw   is not None else _latest["gimbal_yaw"]
+    _latest["gimbal_pitch"] = gimbal_pitch if gimbal_pitch is not None else _latest["gimbal_pitch"]
 
 def on_connect(client, userdata, flags, rc_or_reason, properties=None):
     try:
@@ -237,7 +257,7 @@ def _update_weighted_average(lat: float, lon: float, yolo_boxes, rgb_w: int, rgb
     _wavg_acc["sum_w_lat"] += w * lat
     _wavg_acc["sum_w_lon"] += w * lon
     return (_wavg_acc["sum_w_lat"] / _wavg_acc["sum_w"],
-            _wavg_acc["sum_w_lon"] / _wavg_acc["sum_w"])
+            (_wavg_acc["sum_w_lon"] / _wavg_acc["sum_w"]))
 
 def _log_detection(frame_id: int):
     # Write LRF target values (required)
@@ -248,6 +268,27 @@ def _log_detection(frame_id: int):
             f.write(line)
     except Exception as e:
         print(f"[LOG] Failed to write to '{_DETECTIONS_LOG}': {e}")
+
+# >>>>>>>>>>>>>>>>>>> ADDED: bbox in detections.txt (without touching _log_detection) <<<<<<<<<<<<<
+def _log_detection_with_bbox(frame_id: int, yb):
+    """
+    Writes a richer row to detections.txt that includes the intersected bbox:
+    ts,frame_id,lrf_lat,lrf_lon,lrf_dist,x1,y1,x2,y2,cx,cy
+    Falls back to _log_detection if any required part is missing.
+    """
+    if yb is None or _latest.get("lrf_lat") is None or _latest.get("lrf_lon") is None:
+        return _log_detection(frame_id)
+    x1, y1, x2, y2 = map(int, yb)
+    cx = int(0.5 * (x1 + x2))
+    cy = int(0.5 * (y1 + y2))
+    ts_str = _iso_ts(_latest["ts"])
+    line = f"{ts_str},{frame_id},{_latest['lrf_lat']},{_latest['lrf_lon']},{_latest['lrf_dist']},{x1},{y1},{x2},{y2},{cx},{cy}\n"
+    try:
+        with open(_DETECTIONS_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception as e:
+        print(f"[LOG] Failed to write bbox row to '{_DETECTIONS_LOG}': {e}")
+# <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
 def _log_avg(frame_id: int, avg_lat: float, avg_lon: float):
     ts_str = _iso_ts(_latest["ts"])
@@ -266,6 +307,224 @@ def _log_wavg(frame_id: int, wavg_lat: float, wavg_lon: float):
             f.write(line)
     except Exception as e:
         print(f"[LOG] Failed to write to '{_WAVG_LOG}': {e}")
+
+# >>>>>>>>>>>>>>>>>>>>>>>>>> ADDED: BBOX GEO helpers <<<<<<<<<<<<<<<<<<<<<<<<<<
+def _meters_per_deg(lat_rad: float):
+    # Simple equirectangular factors
+    m_per_deg_lat = 111320.0
+    m_per_deg_lon = 111320.0 * np.cos(lat_rad)
+    return m_per_deg_lat, m_per_deg_lon
+
+def _add_meters_to_ll(lat_deg: float, lon_deg: float, dE_m: float, dN_m: float):
+    lat_rad = np.deg2rad(lat_deg if lat_deg is not None else 0.0)
+    m_per_deg_lat, m_per_deg_lon = _meters_per_deg(lat_rad)
+    dlat = dN_m / m_per_deg_lat
+    dlon = dE_m / max(1e-9, m_per_deg_lon)
+    return lat_deg + dlat, lon_deg + dlon
+
+def _estimate_bbox_centroid_geo(yb, rgb_w, rgb_h, hfov_deg, vfov_deg):
+    """
+    First-order GSD approximation around the LRF point (assumed to be image center on ground).
+    Converts bbox centroid pixel offset -> meters on ground -> adds to LRF lat/lon with yaw rotation.
+    Works best with gimbal_pitch ~= -90 deg (nadir).
+    """
+    if _latest["lrf_lat"] is None or _latest["lrf_lon"] is None:
+        return None
+    if _latest["air_h"] is None:
+        return None
+
+    # image center offset (pixels)
+    x1, y1, x2, y2 = yb
+    cx = 0.5 * (x1 + x2)
+    cy = 0.5 * (y1 + y2)
+    cx0 = 0.5 * rgb_w
+    cy0 = 0.5 * rgb_h
+    dx_px = cx - cx0           # + right
+    dy_px = cy - cy0           # + down
+
+    # ground sampling distance (meters per pixel), approximated from altitude + FOV
+    h = float(_latest["air_h"])  # meters (host.height)
+    hfov = np.deg2rad(hfov_deg)
+    vfov = np.deg2rad(vfov_deg)
+    gsd_x = 2.0 * h * np.tan(hfov * 0.5) / max(1.0, rgb_w)
+    gsd_y = 2.0 * h * np.tan(vfov * 0.5) / max(1.0, rgb_h)
+
+    # meters in camera frame assuming nadir-like projection around center
+    mx_cam = dx_px * gsd_x           # + right
+    my_cam = dy_px * gsd_y           # + down
+    # Convert to EN (East, North) before yaw:
+    # Down in image -> toward South; so North offset is negative of my_cam
+    dE_local = mx_cam
+    dN_local = -my_cam
+
+    # yaw = platform heading + gimbal yaw (deg) if available
+    yaw_deg = (_latest["head"] or 0.0) + (_latest["gimbal_yaw"] or 0.0)
+    yaw = np.deg2rad(yaw_deg)
+    cos_y, sin_y = np.cos(yaw), np.sin(yaw)
+    dE_world =  cos_y * dE_local - sin_y * dN_local
+    dN_world =  sin_y * dE_local + cos_y * dN_local
+
+    # add to LRF lat/lon
+    lat0 = float(_latest["lrf_lat"])
+    lon0 = float(_latest["lrf_lon"])
+    est_lat, est_lon = _add_meters_to_ll(lat0, lon0, dE_world, dN_world)
+    return est_lat, est_lon, float(cx), float(cy)
+
+def _log_bbox(frame_id: int, est_lat: float, est_lon: float, cx: float, cy: float):
+    ts_str = _iso_ts(_latest["ts"])
+    line = f"{ts_str},{frame_id},{est_lat},{est_lon},{int(cx)},{int(cy)}\n"
+    try:
+        with open(_DETECTIONS_BBOX_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+    except Exception as e:
+        print(f"[LOG] Failed to write to '{_DETECTIONS_BBOX_LOG}': {e}")
+
+def _accum_bbox_avg(lat: float, lon: float):
+    if lat is None or lon is None:
+        return
+    _bbox_avg["n"] += 1
+    _bbox_avg["sum_lat"] += lat
+    _bbox_avg["sum_lon"] += lon
+
+def _write_bbox_final_average_as_last_entry():
+    if _bbox_avg["n"] <= 0:
+        return
+    avg_lat = _bbox_avg["sum_lat"] / _bbox_avg["n"]
+    avg_lon = _bbox_avg["sum_lon"] / _bbox_avg["n"]
+    ts_str = _iso_ts(_latest["ts"])
+    line = f"{ts_str},FINAL_AVG,{avg_lat},{avg_lon},-1,-1\n"
+    try:
+        with open(_DETECTIONS_BBOX_LOG, "a", encoding="utf-8") as f:
+            f.write(line)
+        print(f"[BBOX] Final average appended to { _DETECTIONS_BBOX_LOG }: {avg_lat:.7f}, {avg_lon:.7f}")
+    except Exception as e:
+        print(f"[LOG] Failed to append final average: {e}")
+# <<<<<<<<<<<<<<<<<<<<<< END ADDED: BBOX GEO helpers <<<<<<<<<<<<<<<<<<<<<<<<<<
+
+# ---------- NEW: clustering utilities (no external deps) ----------
+def _load_lat_lon_from_detections(path):
+    """
+    Reads detections.txt lines of the form:
+    ts,frame_id,lat,lon,dist[,x1,y1,x2,y2,cx,cy]
+    Returns Nx2 float ndarray of [lat, lon].
+    """
+    pts = []
+    if not os.path.exists(path):
+        return np.asarray(pts, dtype=float)
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            parts = line.strip().split(",")
+            if len(parts) < 4:
+                continue
+            try:
+                lat = float(parts[2])
+                lon = float(parts[3])
+            except Exception:
+                continue
+            if np.isfinite(lat) and np.isfinite(lon):
+                pts.append([lat, lon])
+    return np.asarray(pts, dtype=float)
+
+def _pairwise_within_eps_idx(pts, eps_deg):
+    """
+    Returns adjacency list: indices of neighbors within eps (in degrees).
+    O(N^2) but fine for typical detection counts.
+    """
+    n = len(pts)
+    nbrs = [[] for _ in range(n)]
+    if n == 0:
+        return nbrs
+    # approx Euclidean in lat/lon degrees (ok for small radii)
+    for i in range(n):
+        for j in range(i+1, n):
+            d = np.hypot(pts[i,0]-pts[j,0], pts[i,1]-pts[j,1])
+            if d <= eps_deg:
+                nbrs[i].append(j)
+                nbrs[j].append(i)
+    return nbrs
+
+def _dbscan_like_largest_cluster(pts, eps_deg=0.00008, min_samples=3):
+    """
+    Minimal DBSCAN-style clustering:
+    - core point: has >= min_samples-1 neighbors within eps
+    - expand clusters from cores, including border points (neighbors of any core)
+    Returns indices of the LARGEST cluster (or empty list).
+    """
+    n = len(pts)
+    if n == 0:
+        return []
+
+    nbrs = _pairwise_within_eps_idx(pts, eps_deg)
+    is_core = np.array([len(nbrs[i]) >= (min_samples-1) for i in range(n)], dtype=bool)
+
+    visited = np.zeros(n, dtype=bool)
+    best_cluster = []
+
+    for i in range(n):
+        if visited[i] or not is_core[i]:
+            continue
+        # start new cluster from core i
+        stack = [i]
+        cluster = set()
+        visited[i] = True
+        while stack:
+            u = stack.pop()
+            cluster.add(u)
+            # all neighbors within eps are potential cluster members
+            for v in nbrs[u]:
+                if not visited[v]:
+                    visited[v] = True
+                    # if neighbor is core, continue expansion
+                    if is_core[v]:
+                        stack.append(v)
+                    cluster.add(v)  # include border points too
+        if len(cluster) > len(best_cluster):
+            best_cluster = list(cluster)
+
+    return sorted(best_cluster)
+
+def _weighted_average_inverse_distance(pts, center):
+    """
+    Weighted average with weights = 1 / (1e-9 + distance to center).
+    pts: Nx2 [lat, lon]; center: [lat, lon]
+    """
+    if len(pts) == 0:
+        return None
+    d = np.hypot(pts[:,0] - center[0], pts[:,1] - center[1])
+    w = 1.0 / (1e-9 + d)
+    w_sum = np.sum(w)
+    lat = np.sum(w * pts[:,0]) / w_sum
+    lon = np.sum(w * pts[:,1]) / w_sum
+    return float(lat), float(lon)
+
+def _cluster_and_write_averages(detections_path, eps_deg, min_samples, out_avg_path, out_wavg_path):
+    pts = _load_lat_lon_from_detections(detections_path)
+    if pts.size == 0:
+        print(f"[CLUSTER] No detections found in {detections_path}; skipping clustered averages.")
+        return
+
+    idxs = _dbscan_like_largest_cluster(pts, eps_deg=eps_deg, min_samples=min_samples)
+    if len(idxs) == 0:
+        print("[CLUSTER] No dense cluster found; skipping clustered averages.")
+        return
+
+    clustered = pts[idxs]
+    avg_lat = float(np.mean(clustered[:,0]))
+    avg_lon = float(np.mean(clustered[:,1]))
+    wavg_lat, wavg_lon = _weighted_average_inverse_distance(clustered, [avg_lat, avg_lon])
+
+    ts_str = _iso_ts(_latest["ts"])
+    # Save (single line) like prior files: ts,FRAME,lat,lon
+    try:
+        with open(out_avg_path, "w", encoding="utf-8") as f:
+            f.write(f"{ts_str},CLUSTER,{avg_lat},{avg_lon}\n")
+        with open(out_wavg_path, "w", encoding="utf-8") as f:
+            f.write(f"{ts_str},CLUSTER,{wavg_lat},{wavg_lon}\n")
+        print(f"[CLUSTER] Cluster size={len(clustered)} | avg=({avg_lat:.7f},{avg_lon:.7f}) "
+              f"| wavg=({wavg_lat:.7f},{wavg_lon:.7f})")
+        print(f"[CLUSTER] Wrote: {out_avg_path}, {out_wavg_path}")
+    except Exception as e:
+        print(f"[CLUSTER] Failed to write clustered averages: {e}")
 
 # <<<<<<<<<<<<<<<<<<<<<<< END ADDED: MQTT <<<<<<<<<<<<<<<<<<<<<<<<<<
 
@@ -288,7 +547,7 @@ def wait_for_first_frame(cap, timeout_s=4.0):
         ok, frame = cap.read()
         if ok and frame is not None and frame.size > 0:
             return frame
-        time.sleep(0.01)
+        # time.sleep(0.01)
     return None
 
 def split_halves(frame: np.ndarray):
@@ -316,15 +575,22 @@ def ir_hsv_mask(bgr: np.ndarray, lower: tuple, upper: tuple) -> np.ndarray:
     return mask
 
 def draw_boxes_from_mask(bgr: np.ndarray, mask: np.ndarray, min_area: int) -> np.ndarray:
-    out = bgr
+
+    out = bgr.copy()
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    detected = False
     for c in contours:
-        if cv2.contourArea(c) < min_area:
+        area = cv2.contourArea(c)
+        if area < min_area:
             continue
         x, y, w, h = cv2.boundingRect(c)
         cv2.rectangle(out, (x, y), (x+w, y+h), (0, 0, 255), 2)
-        cv2.putText(out, "fire", (x, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2, cv2.LINE_AA)
-    return out
+        cv2.putText(out, "fire", (x, y-5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2, cv2.LINE_AA)
+        detected = True  # mark that at least one contour passed the area threshold
+
+    return out, detected
 
 def maybe_warp_ir(ir_bgr: np.ndarray, use_warp: bool, H: np.ndarray, dst_w: int, dst_h: int,
                   src_w: int, src_h: int) -> np.ndarray:
@@ -377,8 +643,8 @@ def main():
     ap.add_argument("--url", default=URL, help="RTMP/HTTP(S) URL of composite stream (left=IR, right=RGB)")
     ap.add_argument("--skip", type=int, default=0, help="Frames to discard between processed frames")
     # YOLO (RGB)
-    # ap.add_argument("--weights", default="yolo11m.onnx", help="YOLO weights (.onnx/.pt/.engine)")
-    ap.add_argument("--weights", default="10-41K-100e-l.onnx", help="YOLO weights (.onnx/.pt/.engine)")
+    # ap.add_argument("--weights", default="10-41K-100e-l.onnx", help="YOLO weights (.onnx/.pt/.engine)")
+    ap.add_argument("--weights", default="10-8K-100e-n.onnx", help="YOLO weights (.onnx/.pt/.engine)")
     ap.add_argument("--conf", type=float, default=0.50, help="Confidence threshold")
     ap.add_argument("--imgsz", type=int, default=640, help="Inference image size (multiple of 32)")
     ap.add_argument("--rect", action="store_true", help="Minimal padding to match stride (faster on .onnx)")
@@ -396,6 +662,14 @@ def main():
     ap.add_argument("--dst-wh", type=int, nargs=2, default=[1280, 720], help="IR warp destination size")
     # windows & saving
     ap.add_argument("--save-dir", default="captures", help="Directory to save snapshots")
+    # >>>>>>>>>>>>>>>>>>>>> ADDED: CLI FOV for bbox->geo <<<<<<<<<<<<<<<<<<<<<<
+    ap.add_argument("--hfov-deg", type=float, default=95.0, help="RGB horizontal FOV (deg)")
+    ap.add_argument("--vfov-deg", type=float, default=90.0, help="RGB vertical FOV (deg)")
+    # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+    # ---------- NEW: clustering CLI ----------
+    # ap.add_argument("--cluster-eps-deg", type=float, default=0.00008, help="DBSCAN-like epsilon in degrees (~9m lat)")
+    ap.add_argument("--cluster-eps-deg", type=float, default=0.0000359, help="DBSCAN-like epsilon in degrees (~4m lat)")
+    ap.add_argument("--cluster-min-samples", type=int, default=3, help="Min samples for dense core")
     args = ap.parse_args()
 
     # Start MQTT listener (non-blocking)
@@ -442,9 +716,9 @@ def main():
         ok, frame = cap.read()
         if not ok or frame is None:
             cap.release()
-            time.sleep(0.05)
+            time.sleep(0.0005)
             cap = open_cap(args.url)
-            frame = wait_for_first_frame(cap, timeout_s=0.8)
+            frame = wait_for_first_frame(cap, timeout_s=0.008)
             if frame is None:
                 continue
 
@@ -459,7 +733,10 @@ def main():
 
         # IR detection (mask + boxes)
         ir_mask = ir_hsv_mask(ir_left, hsv_lo, hsv_hi)
-        ir_anno = draw_boxes_from_mask(ir_left.copy(), ir_mask, args.ir_min_area)
+        ir_anno, detected = draw_boxes_from_mask(ir_left.copy(), ir_mask, args.ir_min_area)
+
+        if not detected:
+            continue
 
         # Map IR mask onto RGB geometry to look for overlaps with YOLO (heuristic)
         rgb_h, rgb_w = rgb_right.shape[:2]
@@ -477,23 +754,40 @@ def main():
 
         # Require overlap AND an LRF target to log
         has_intersection = False
+        first_matching_yolo_box = None
         for ib in ir_boxes_on_rgb:
             for yb in yolo_boxes:
                 if _intersects(ib, yb):
                     has_intersection = True
+                    first_matching_yolo_box = yb
                     break
             if has_intersection:
                 break
 
         if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None:
             print(f"----> INTERSECTION + LRF target at frame {frame_id} -> logging to detections.txt")
-            _log_detection(frame_id)
+            # REPLACED CALL: use the richer logger that includes bbox in detections.txt
+            _log_detection_with_bbox(frame_id, first_matching_yolo_box)
+
             avg = _update_running_average(_latest["lrf_lat"], _latest["lrf_lon"])
             if avg is not None:
                 _log_avg(frame_id, avg[0], avg[1])
             wavg = _update_weighted_average(_latest["lrf_lat"], _latest["lrf_lon"], yolo_boxes, rgb_w, rgb_h)
             if wavg is not None:
                 _log_wavg(frame_id, wavg[0], wavg[1])
+
+            # bbox -> geo estimate & logging (unchanged)
+            if first_matching_yolo_box is not None:
+                est = _estimate_bbox_centroid_geo(first_matching_yolo_box, rgb_w, rgb_h,
+                                                  args.hfov_deg, args.vfov_deg)
+                if est is not None:
+                    est_lat, est_lon, cx, cy = est
+                    _log_bbox(frame_id, est_lat, est_lon, cx, cy)
+                    _accum_bbox_avg(est_lat, est_lon)
+                    # draw a marker on RGB preview
+                    cv2.circle(rgb_anno, (int(cx), int(cy)), 6, (0,255,0), 2)
+                    cv2.putText(rgb_anno, f"{est_lat:.6f},{est_lon:.6f}",
+                                (int(cx)+8, int(cy)-8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 2, cv2.LINE_AA)
 
         now = time.time()
         if now - last_info > 1.0:
@@ -514,6 +808,18 @@ def main():
             idx += 1
 
         frame_id += 1
+
+    # write final bbox average line
+    _write_bbox_final_average_as_last_entry()
+
+    # ---------- NEW: post-run clustering from detections.txt ----------
+    _cluster_and_write_averages(
+        detections_path=_DETECTIONS_LOG,
+        eps_deg=args.cluster_eps_deg,
+        min_samples=args.cluster_min_samples,
+        out_avg_path=_CLUSTERED_AVG_LOG,
+        out_wavg_path=_CLUSTERED_WAVG_LOG,
+    )
 
     cap.release()
     cv2.destroyAllWindows()
