@@ -25,7 +25,20 @@ URL = "rtmp://192.168.200.55/live/ir"
 # --------- Flask http routes -----------
 @app.route('/status_text')
 def status_text():
-    return jsonify({"text": status_message})
+    pos = {
+        "air_lat": _latest.get("air_lat"),
+        "air_lon": _latest.get("air_lon"),
+        "air_alt": _latest.get("air_h"),
+        "heading": _latest.get("head"),
+        "pitch": _latest.get("pitch"),
+        "roll": _latest.get("roll"),
+        "lrf_lat": _latest.get("lrf_lat"),
+        "lrf_lon": _latest.get("lrf_lon"),
+        "lrf_alt": _latest.get("lrf_alt"),
+        "lrf_dist": _latest.get("lrf_dist"),
+        "ts": _latest.get("ts")
+    }
+    return jsonify({"text": status_message, "position": pos})
 
 @app.route('/ir_feed')
 def ir_feed():
@@ -438,7 +451,7 @@ def main():
     ap.add_argument("--skip", type=int, default=0, help="Frames to discard between processed frames")
     # YOLO (RGB)
     # ap.add_argument("--weights", default="yolo11m.onnx", help="YOLO weights (.onnx/.pt/.engine)")
-    ap.add_argument("--weights", default="10-41K-100e-l.onnx", help="YOLO weights (.onnx/.pt/.engine)")
+    ap.add_argument("--weights", default="10-8K-100e-n.onnx", help="YOLO weights (.onnx/.pt/.engine)")
     ap.add_argument("--conf", type=float, default=0.50, help="Confidence threshold")
     ap.add_argument("--imgsz", type=int, default=640, help="Inference image size (multiple of 32)")
     ap.add_argument("--rect", action="store_true", help="Minimal padding to match stride (faster on .onnx)")
@@ -482,8 +495,8 @@ def main():
         cap.release()
         return
 
-    cv2.namedWindow("IR (annotated)",  cv2.WINDOW_NORMAL)
-    cv2.namedWindow("RGB (YOLO)",      cv2.WINDOW_NORMAL)
+    # cv2.namedWindow("IR (annotated)",  cv2.WINDOW_NORMAL)
+    # cv2.namedWindow("RGB (YOLO)",      cv2.WINDOW_NORMAL)
     os.makedirs(args.save_dir, exist_ok=True)
     idx = 0
     print(f"Press 's' to save both halves, 'q' to quit. Skipping {args.skip} frames.")
@@ -495,25 +508,38 @@ def main():
     frame_id = 0
 
     while True:
-        for _ in range(max(0, args.skip)):
-            if not cap.grab():
-                break
+        # for _ in range(max(0, args.skip)):
+        #     if not cap.grab():
+        #         break        
+
+
+        # if not ok or frame is None:
+        #     cap.release()
+        #     time.sleep(0.05)
+        #     cap = open_cap(args.url)
+        #     frame = wait_for_first_frame(cap, timeout_s=0.8)
+        #     if frame is None:
+        #         continue
+
+
+
+        # for _ in range(2):
+        #     if not cap.grab():
+        #         break
+        # ok2, latest = cap.retrieve()
+        # if ok2 and latest is not None:
+        #     frame = latest
+
+
+        # Newly added part
+        ok, frame = cap.read()
 
         ok, frame = cap.read()
         if not ok or frame is None:
-            cap.release()
-            time.sleep(0.05)
-            cap = open_cap(args.url)
-            frame = wait_for_first_frame(cap, timeout_s=0.8)
-            if frame is None:
-                continue
+            time.sleep(0.01)
+            continue
+        #end of new part
 
-        for _ in range(2):
-            if not cap.grab():
-                break
-        ok2, latest = cap.retrieve()
-        if ok2 and latest is not None:
-            frame = latest
 
         ir_left, rgb_right = split_halves(frame)
 
@@ -567,8 +593,8 @@ def main():
         if now - last_info > 1.0:
             last_info = now
 
-        cv2.imshow("IR (annotated)", ir_anno)
-        cv2.imshow("RGB (YOLO)", rgb_anno)
+        # cv2.imshow("IR (annotated)", ir_anno)
+        # cv2.imshow("RGB (YOLO)", rgb_anno)
 
         key = cv2.waitKey(1) & 0xFF
         if key == ord('q') or key == 27:
