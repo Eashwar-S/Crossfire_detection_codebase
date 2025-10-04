@@ -1,4 +1,4 @@
-#Testing new branch changes
+# GUI link: http://192.168.200.55:8000/
 #!/usr/bin/env python3
 import os
 import time
@@ -7,8 +7,39 @@ import argparse
 import numpy as np
 from ultralytics import YOLO
 
+# --------- Flask imports ----------- live view link: http://192.168.200.55:8000/
+from flask import Flask, Response, send_from_directory, jsonify
+import threading
+
+# --------- Flask creation -----------
+app = Flask(__name__, static_folder='.')
+frame_lock = threading.Lock()
+latest_ir_frame = None 
+latest_rgb_frame = None
+status_message = "System initialized."
+
 # ---------- Stream & FFmpeg backend ----------
 URL = "rtmp://192.168.200.55/live/ir"
+
+# --------- Flask http routes -----------
+@app.route('/ir_feed')
+def ir_feed():
+    return Response(_mjpeg_generator(lambda: latest_ir_frame),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/rgb_feed')
+def rgb_feed():
+    return Response(_mjpeg_generator(lambda: latest_rgb_frame),
+                    mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@app.route('/')
+def index():
+    return send_from_directory('.', 'index.html')
+
+@app.route('/status_text')
+def status_text():
+    global status_message
+    return jsonify({"text": status_message})
 
 # >>>>>>>>>>>>>>>>>>>>>>>>>> ADDED: MQTT (integrated) <<<<<<<<<<<<<<<<<<<<<<<<<<
 import json, threading
@@ -40,6 +71,24 @@ _WAVG_LOG       = "detections_wavg.txt"
 # Running aggregates (for LRF target)
 _avg_acc  = {"n": 0, "sum_lat": 0.0, "sum_lon": 0.0}
 _wavg_acc = {"sum_w": 0.0, "sum_w_lat": 0.0, "sum_w_lon": 0.0}
+
+# Flask helper function
+def _mjpeg_generator(get_frame_fn, jpeg_quality=80, target_sleep=0.03):
+    """Yield multipart JPEG frames from the current numpy BGR frame returned by get_frame_fn()."""
+    while True:
+        with frame_lock:
+            frame = get_frame_fn()
+        if frame is None:
+            time.sleep(0.01)
+            continue
+        ok, jpg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), jpeg_quality])
+        if not ok:
+            time.sleep(0.01)
+            continue
+        jpg_bytes = jpg.tobytes()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + jpg_bytes + b'\r\n')
+        time.sleep(target_sleep)
 
 def _iso_ts(ts_ms):
     if isinstance(ts_ms, (int, float)):
@@ -373,6 +422,16 @@ def _get_yolo_boxes_dup(model: YOLO, frame_bgr: np.ndarray, imgsz: int, conf: fl
 
 # ---------- Main ----------
 def main():
+
+    ## making Flask variables global and starting Flask thread
+    global latest_ir_frame, latest_rgb_frame
+    def _start_flask_server():
+        app.run(host="0.0.0.0", port=8000, threaded=True, debug=False)
+
+    # start flask in background
+    flask_thread = threading.Thread(target=_start_flask_server, daemon=True)
+    flask_thread.start()
+
     ap = argparse.ArgumentParser(description="RTMP split (IR|RGB) with YOLO (RGB) + IR HSV thresholding + MQTT LRF logging")
     # stream + skipping
     ap.add_argument("--url", default=URL, help="RTMP/HTTP(S) URL of composite stream (left=IR, right=RGB)")
@@ -472,6 +531,12 @@ def main():
                             classes=args.classes, rect=args.rect, device=args.device)
         yolo_boxes = _get_yolo_boxes(model, rgb_right, imgsz=args.imgsz, conf=args.conf,
                                      classes=args.classes, rect=args.rect, device=args.device)
+
+        # Updating Flask images sent to http server
+        with frame_lock:
+            latest_ir_frame = ir_anno.copy()
+            latest_rgb_frame = rgb_anno.copy()
+        status_message = f"Frame updated at {time.strftime('%H:%M:%S')}"
 
         # Debug: show counts + whether LRF is ready
         print(f"Frame {frame_id}: IR boxes={len(ir_boxes_on_rgb)}, YOLO boxes={len(yolo_boxes)} | LRF ready={_latest['lrf_lat'] is not None}")
