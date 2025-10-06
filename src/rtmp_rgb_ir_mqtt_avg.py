@@ -176,64 +176,62 @@ def _extract_from_osd_message(m: dict):
     _latest["lrf_alt"]  = lrf_alt  if lrf_alt  is not None else _latest["lrf_alt"]
     _latest["lrf_dist"] = lrf_dist if lrf_dist is not None else _latest["lrf_dist"]
 
-def calcluatecoords(m: dict):
-    ts = m.get("timestamp")
-    ts = _maybe_float(ts)
+# def calcluatecoords(m: dict):
+#     ts = m.get("timestamp")
+#     ts = _maybe_float(ts)
 
-    # resolve 'host' node
-    root = m.get("data", m)
-    host = root.get("host") if isinstance(root, dict) else None
-    if not isinstance(host, dict):
-        # Some payloads may not have host; nothing to do
-        if ts is not None:
-            _latest["ts"] = ts
-        return
+#     # resolve 'host' node
+#     root = m.get("data", m)
+#     host = root.get("host") if isinstance(root, dict) else None
+#     if not isinstance(host, dict):
+#         # Some payloads may not have host; nothing to do
+#         if ts is not None:
+#             _latest["ts"] = ts
+#         return
 
-    # aircraft pose (if provided at host level)
-    air_lat = _maybe_float(host.get("latitude"))
-    air_lon = _maybe_float(host.get("longitude"))
-    air_h   = _maybe_float(host.get("height"))
-    head    = _maybe_float(host.get("attitude_head"))
-    pitch   = _maybe_float(host.get("attitude_pitch"))
-    roll    = _maybe_float(host.get("attitude_roll"))
-    px = int(host.get["cameras"][0]["ir_metering_point"]["x"] * 640)
-    py = int(host.get["cameras"][0]["ir_metering_point"]["y"] * 512)
-    flr_lat = _maybe_float(host.get("measure_target_latitude")) 
-    flr_lon = _maybe_float(host.get("measure_target_longitude")) 
-    status_message = f"pixels: {px} {py}"
-    R_earth = 6378137.0
-    px_center_x = 320
-    px_center_y = 256
-    theta = 45
+#     # aircraft pose (if provided at host level)
+#     air_lat = _maybe_float(host.get("latitude"))
+#     air_lon = _maybe_float(host.get("longitude"))
+#     air_h   = _maybe_float(host.get("height"))
+#     head    = _maybe_float(host.get("attitude_head"))
+#     pitch   = _maybe_float(host.get("attitude_pitch"))
+#     roll    = _maybe_float(host.get("attitude_roll"))
+#     px = int(host.get["cameras"][0]["ir_metering_point"]["x"] * 640)
+#     py = int(host.get["cameras"][0]["ir_metering_point"]["y"] * 512)
+#     flr_lat = _maybe_float(host.get("measure_target_latitude")) 
+#     flr_lon = _maybe_float(host.get("measure_target_longitude")) 
+#     status_message = f"pixels: {px} {py}"
+#     R_earth = 6378137.0
+#     px_center_x = 320
+#     px_center_y = 256
+#     theta = 45
 
-    dx = px - px_center_x
-    dy = py - px_center_y
+#     dx = px - px_center_x
+#     dy = py - px_center_y
 
-    # keep same small-angle pinhole approximation used in your working code
-    fov_x, fov_y = 0.6, 0.45
-    alpha_x = dx / px_center_x * (fov_x / 2)
-    alpha_y = dy / px_center_y * (fov_y / 2)
+#     # keep same small-angle pinhole approximation used in your working code
+#     fov_x, fov_y = 0.6, 0.45
+#     alpha_x = dx / px_center_x * (fov_x / 2)
+#     alpha_y = dy / px_center_y * (fov_y / 2)
 
-    # replicate the math style from your example code (theta in degrees + alpha in radians was used there)
-    # to preserve the exact behavior you said works in your system
-    theta_total = theta + alpha_y
-    d_forward = air_h * np.tan(-theta_total)
-    d_side = air_h * np.tan(alpha_x)
+#     # replicate the math style from your example code (theta in degrees + alpha in radians was used there)
+#     # to preserve the exact behavior you said works in your system
+#     theta_total = theta + alpha_y
+#     d_forward = air_h * np.tan(-theta_total)
+#     d_side = air_h * np.tan(alpha_x)
 
-    heading_rad = np.deg2rad(head)
-    north_disp = d_forward * np.cos(heading_rad) - d_side * np.sin(heading_rad)
-    east_disp  = d_forward * np.sin(heading_rad) + d_side * np.cos(heading_rad)
+#     heading_rad = np.deg2rad(head)
+#     north_disp = d_forward * np.cos(heading_rad) - d_side * np.sin(heading_rad)
+#     east_disp  = d_forward * np.sin(heading_rad) + d_side * np.cos(heading_rad)
 
-    dlat = north_disp / R_earth * (180/np.pi)
-    dlon = east_disp / (R_earth * np.cos(np.deg2rad(Lat0))) * (180/np.pi)
+#     dlat = north_disp / R_earth * (180/np.pi)
+#     dlon = east_disp / (R_earth * np.cos(np.deg2rad(Lat0))) * (180/np.pi)
 
-    lat = flr_lat + dlat
-    lon = flr_lon + dlon
+#     lat = flr_lat + dlat
+#     lon = flr_lon + dlon
 
-    status_message = f"Estimated location: {lat}, {lon}"
-    return lat, lon
-
-
+#     status_message = f"Estimated location: {lat}, {lon}"
+#     return lat, lon
 
 
 
