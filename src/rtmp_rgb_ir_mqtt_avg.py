@@ -177,44 +177,63 @@ def _extract_from_osd_message(m: dict):
     _latest["lrf_alt"]  = lrf_alt  if lrf_alt  is not None else _latest["lrf_alt"]
     _latest["lrf_dist"] = lrf_dist if lrf_dist is not None else _latest["lrf_dist"]
 
-def calcluatecoords():
+
+# Pixel -> coordinate 1
+
+def bearing_deg(lat1, lon1, lat2, lon2):
+    φ1, φ2 = math.radians(lat1), math.radians(lat2)
+    Δλ = math.radians(lon2 - lon1)
+    y = math.sin(Δλ) * math.cos(φ2)
+    x = math.cos(φ1)*math.sin(φ2) - math.sin(φ1)*math.cos(φ2)*math.cos(Δλ)
+    θ = math.atan2(y, x)
+    return (math.degrees(θ) + 360) % 360  # 0=North, clockwise
+
+# Pixel -> coordinate 1
+def calcluatecoords(xPixVal, yPixVal):
 
     # Constants
-    dFOV = CONSTANT # degrees
+    dFOV = CONSTANT * math.pi / 180 # degrees
     xPixMax = CONSTANT 
     yPixMax = CONSTANT
     rEarth = CONSTANT # meters
+    height = VARIABLE # Hardcoded 
+    pitch = -VARIABLE * math.pi / 180 # pitch of the camera, facing down: -90, facing 45: -45, facing forward: 0
 
     # Variable
-    height = VARIABLE # meters
-    heading = VARIABLE * PI / 180 # north: 0, east: 90, south: 180, west: 270
-    long = VARIABLE # longitude
+    heading = _latest["heading"] * math.pi / 180 # north: 0, east: 90, south: 180, west: 270
     lat = VARIABLE # latitude
-    xPixVal = VARIABLE # pixel of interest location, 0: left, xPixMax: right
-    yPixVal = VARIABLE # pixle of interest location, 0: down, yPixMax: top
-    pitch = VARIABLE * PI / 180 # pitch of the camera, facing down: 90, facing 45: 45, facing forward: 0
+    lon = VARIABLE # longitude
+    # xPixVal = xPixVal # pixel of interest location, 0: left, xPixMax: right
+    # yPixVal = yPixVal # pixel of interest location, 0: up, yPixMax: down
 
     # Calculating x and y FOV
     omega = math.atan(yPixMax/xPixMax)
-    xFOV = math.cos(omega) * pitch
-    yFOV = math.sin(omega) * pitch
+    xFOV = math.cos(omega) * dFOV
+    yFOV = math.sin(omega) * dFOV
 
     # Pixel -> Angle from the center
-    xAngle = -(xPixMax/2 - xPixVal) * xFOV/xPixMax
+    xAngle = (xPixMax/2 - xPixVal) * xFOV/xPixMax
     yAngle = -(yPixMax/2 - yPixVal) * yFOV/yPixMax
 
     # Vector functions
-    d = (math.cos(xAngle))^2 +  ((math.cos(yAngle - pitch))^2) * ((math.sin(xAngle))^2)
-    vX = (math.cos(yAngle - pitch)) * (math.sin(xAngle)) / (math.sqrt(d))
-    vY = (math.cos(yAngle - pitch)) * (math.sin(xAngle)) / (math.sqrt(d))
-    vZ = (math.sin(yAngle - pitch)) * (math.cos(xAngle)) / (math.sqrt(d))
+    vn = (math.cos(pitch) - math.tan(yAngle) * math.sin(pitch)) * math.cos(heading) + math.tan(xAngle) * math.sin(heading)
+    ve = (math.cos(pitch) - math.tan(yAngle) * math.sin(pitch)) * math.sin(heading) - math.tan(xAngle) * math.cos(heading)
+    vd = math.sin(pitch) + math.tan(yAngle) * math.cos(pitch)
 
     # Displacement Calculations
-    diffX = (vX * height / vZ) * math.cos(heading)
-    diffY = 
+    mn = height * vn/vd
+    me = height * ve/vd
 
-    status_message = f"Estimated location: {lat}, {lon}"
-    return lat, lon
+
+    # final equations
+    latF = lat + (mn / 111132.0)
+    lonF = lon + (me / (111132.0 * math.cos(lat * math.pi / 180)))
+
+    # latF = lat + (diffY/(rEarth/2)) * 180
+    # lonF = lon + (diffX/(rEarth/2)) * 180
+
+    status_message = f"Estimated location: {latF}, {lonF}"
+    return latF, lonF
 
 
 
@@ -550,7 +569,25 @@ def main():
     last_info = 0.0
     frame_id = 0
 
+    counterlat = 0
+    lat_cur = VARIABLE
+    lon_cur = VARIABLE
+    lat_prev = lat_cur
+    lon_prev = lon_cur
+    heading = bearing_deg()
+
     while True:
+        
+        if counterlat % 5 == 0:
+            lat_prev = lat_cur
+            lon_prev = lon_cur
+            lat_cur = VARIABLE
+            lon_cur = VARIABLE
+            _latest["heading"] = bearing_deg(lat_prev, lon_prev, lat_cur, lon_cur)
+            
+        counterlat += 1
+
+
         # Read frame from RTMP
         ok, frame = cap.read()
         if not ok or frame is None:
