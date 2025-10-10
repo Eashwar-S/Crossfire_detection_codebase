@@ -32,8 +32,8 @@ def calcluatecoords():
     vZ = (math.sin(yAngle - pitch)) * (math.cos(xAngle)) / (math.sqrt(d))
 
     # Displacement Calculations
-    dist_Right = (vX * height / -vZ) * math.cos(heading)
-    dist_Forward = (vY * height / -vZ) * math.cos(heading)
+    dist_Right = -(vX * height / vZ)
+    dist_Forward = (vY * height / -vZ)
 
     meters_North = dist_Forward * math.cos(heading) - dist_Right * math.sin(heading)
     meters_East  = dist_Forward * math.sin(heading) + dist_Right * math.cos(heading)
