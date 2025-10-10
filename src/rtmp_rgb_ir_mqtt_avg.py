@@ -6,6 +6,7 @@ import time
 import cv2
 import argparse
 import numpy as np
+import math
 from ultralytics import YOLO
 
 # --------- Flask imports ----------- live view link: http://192.168.200.55:8000/
@@ -176,62 +177,44 @@ def _extract_from_osd_message(m: dict):
     _latest["lrf_alt"]  = lrf_alt  if lrf_alt  is not None else _latest["lrf_alt"]
     _latest["lrf_dist"] = lrf_dist if lrf_dist is not None else _latest["lrf_dist"]
 
-# def calcluatecoords(m: dict):
-#     ts = m.get("timestamp")
-#     ts = _maybe_float(ts)
+def calcluatecoords():
 
-#     # resolve 'host' node
-#     root = m.get("data", m)
-#     host = root.get("host") if isinstance(root, dict) else None
-#     if not isinstance(host, dict):
-#         # Some payloads may not have host; nothing to do
-#         if ts is not None:
-#             _latest["ts"] = ts
-#         return
+    # Constants
+    dFOV = CONSTANT # degrees
+    xPixMax = CONSTANT 
+    yPixMax = CONSTANT
+    rEarth = CONSTANT # meters
 
-#     # aircraft pose (if provided at host level)
-#     air_lat = _maybe_float(host.get("latitude"))
-#     air_lon = _maybe_float(host.get("longitude"))
-#     air_h   = _maybe_float(host.get("height"))
-#     head    = _maybe_float(host.get("attitude_head"))
-#     pitch   = _maybe_float(host.get("attitude_pitch"))
-#     roll    = _maybe_float(host.get("attitude_roll"))
-#     px = int(host.get["cameras"][0]["ir_metering_point"]["x"] * 640)
-#     py = int(host.get["cameras"][0]["ir_metering_point"]["y"] * 512)
-#     flr_lat = _maybe_float(host.get("measure_target_latitude")) 
-#     flr_lon = _maybe_float(host.get("measure_target_longitude")) 
-#     status_message = f"pixels: {px} {py}"
-#     R_earth = 6378137.0
-#     px_center_x = 320
-#     px_center_y = 256
-#     theta = 45
+    # Variable
+    height = VARIABLE # meters
+    heading = VARIABLE * PI / 180 # north: 0, east: 90, south: 180, west: 270
+    long = VARIABLE # longitude
+    lat = VARIABLE # latitude
+    xPixVal = VARIABLE # pixel of interest location, 0: left, xPixMax: right
+    yPixVal = VARIABLE # pixle of interest location, 0: down, yPixMax: top
+    pitch = VARIABLE * PI / 180 # pitch of the camera, facing down: 90, facing 45: 45, facing forward: 0
 
-#     dx = px - px_center_x
-#     dy = py - px_center_y
+    # Calculating x and y FOV
+    omega = math.atan(yPixMax/xPixMax)
+    xFOV = math.cos(omega) * pitch
+    yFOV = math.sin(omega) * pitch
 
-#     # keep same small-angle pinhole approximation used in your working code
-#     fov_x, fov_y = 0.6, 0.45
-#     alpha_x = dx / px_center_x * (fov_x / 2)
-#     alpha_y = dy / px_center_y * (fov_y / 2)
+    # Pixel -> Angle from the center
+    xAngle = -(xPixMax/2 - xPixVal) * xFOV/xPixMax
+    yAngle = -(yPixMax/2 - yPixVal) * yFOV/yPixMax
 
-#     # replicate the math style from your example code (theta in degrees + alpha in radians was used there)
-#     # to preserve the exact behavior you said works in your system
-#     theta_total = theta + alpha_y
-#     d_forward = air_h * np.tan(-theta_total)
-#     d_side = air_h * np.tan(alpha_x)
+    # Vector functions
+    d = (math.cos(xAngle))^2 +  ((math.cos(yAngle - pitch))^2) * ((math.sin(xAngle))^2)
+    vX = (math.cos(yAngle - pitch)) * (math.sin(xAngle)) / (math.sqrt(d))
+    vY = (math.cos(yAngle - pitch)) * (math.sin(xAngle)) / (math.sqrt(d))
+    vZ = (math.sin(yAngle - pitch)) * (math.cos(xAngle)) / (math.sqrt(d))
 
-#     heading_rad = np.deg2rad(head)
-#     north_disp = d_forward * np.cos(heading_rad) - d_side * np.sin(heading_rad)
-#     east_disp  = d_forward * np.sin(heading_rad) + d_side * np.cos(heading_rad)
+    # Displacement Calculations
+    diffX = (vX * height / vZ) * math.cos(heading)
+    diffY = 
 
-#     dlat = north_disp / R_earth * (180/np.pi)
-#     dlon = east_disp / (R_earth * np.cos(np.deg2rad(Lat0))) * (180/np.pi)
-
-#     lat = flr_lat + dlat
-#     lon = flr_lon + dlon
-
-#     status_message = f"Estimated location: {lat}, {lon}"
-#     return lat, lon
+    status_message = f"Estimated location: {lat}, {lon}"
+    return lat, lon
 
 
 
