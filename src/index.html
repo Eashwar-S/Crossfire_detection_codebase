@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html>
+    <head> 
+        <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+        <title> CrossfireGUI </title>
+        <style>
+            * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box; 
+            }
+            #row {
+                display: flex;
+                height: 100%;
+            }
+
+
+            body {
+                background: rgb(34, 34, 34);
+                color: white;
+                margin: 0;
+                display: flex;
+                height: 100vh;
+                font-family: monospace;
+                overflow: hidden;
+            }
+
+            #overall {
+                width: 100vw;
+                height: 100vh;
+                /* position: relative; */
+            }
+
+            #console {
+                width: 80vw;
+                /* min-height: 60px; */
+                border: 2px solid rgb(34, 34, 34);
+                overflow-y: auto;
+                border-radius: 10px;
+            }
+
+            #left {
+                width: 50vw;
+                /* height: 80vh; */
+                height: 100%;
+                border: 2px solid rgb(34, 34, 34);
+                display: block;
+            }
+
+            #right {
+                width: 50vw;
+                /* height: 80vh; */
+                height: 100%;
+                border: 2px solid rgb(34, 34, 34);
+                display: block;
+            }
+            
+            #map {
+                aspect-ratio: 1.5 / 1;
+                /* width: 20vw; */
+                position: relative;
+                z-index: 0;
+                height: 100%;
+                display: block;
+                border: 2px solid rgb(34, 34, 34);
+            }
+
+            #upper {
+                width: 100vw;
+                height: 75vh;
+                /* object-fit:cover; */
+            }
+
+            #lower {
+                width: 100vw;
+                height: 25vh;
+                /* object-fit:cover; */
+            }
+
+            #click-layer-map {
+                position: absolute;
+                inset: 0;
+                background: rgba(34, 34, 34,0);
+                cursor: pointer;
+                z-index: 10;
+            }
+
+            #mini-rgb {
+                aspect-ratio: 1.5 / 1;
+                position: absolute;
+                cursor: pointer;
+                border: 3px solid rgb(34, 34, 34);
+                /* width: 20%; */
+                height: 25%;
+                bottom: 0%;
+                left: 0%;
+                overflow: hidden;
+                display: none;
+                z-index: 1002;
+                border-radius: 6px;
+            }
+
+            #compass > * {
+                grid-column: 1;
+                grid-row: 1;
+            }
+
+            #compass {
+                aspect-ratio: 1 / 1;
+                position: absolute;
+                cursor: pointer;
+                border: 2px rgb(34, 34, 34, .89);
+                height: 15%;
+                bottom: 2%;
+                right: 3%;
+                overflow: hidden;
+                display: none;
+                z-index: 1002;
+                border-radius: 50%;
+                background: rgba(34, 34, 34, .89);
+
+                place-items: center;
+            }
+
+            #legend {
+                aspect-ratio: 2 / 1;
+                position: absolute;
+                cursor: pointer;
+                border: 2px rgb(34, 34, 34, .4);
+                height: 8%;
+                top: 3%;
+                right: 3%;
+                overflow: hidden;
+                display: none;
+                z-index: 1002;
+                background: rgba(34, 34, 34, .4);
+                border-radius: 6px;
+
+                /* place-items: center; */
+
+                /* grid-template-columns: 1fr 1fr; 2 columns */
+                grid-template-rows: 1fr 1fr;    /* 2 rows */
+                padding: 5px 8px; /* Added padding for space */
+                gap: 2px 5px;      /* Small gap between items */
+                
+                /* These are for the text inside */
+                color: white;
+                font-size: 0.9em;
+            }
+
+            .legend-dot {
+                /* Dimensions to match a small marker */
+                width: 8px;
+                height: 8px;
+                
+                /* Shape and color to match the L.circleMarker options */
+                border-radius: 50%; /* Makes it a perfect circle */
+                background-color: #CC2C2C; /* Matches your L.circleMarker fillColor */
+                border: 2px solid red; /* Matches your L.circleMarker color/weight */
+                
+                /* Alignment within the status-item container */
+                margin-right: 5px;
+                flex-shrink: 0; /* Prevents it from shrinking if space is tight */
+            }
+
+            #map-status {
+                aspect-ratio: 4 / 1;
+                position: absolute;
+                cursor: pointer;
+                border: 2px rgb(34, 34, 34, .4);
+                height: 8%;
+                bottom: 2%;
+                right: 9%;
+                overflow: hidden;
+                display: none;
+                z-index: 1002;
+                background: rgba(34, 34, 34, .4);
+                border-radius: 6px;
+
+                /* place-items: center; */
+
+                display: grid;
+                grid-template-columns: 1fr 1fr; /* 2 columns */
+                grid-template-rows: 1fr 1fr;    /* 2 rows */
+                padding: 5px 8px; /* Added padding for space */
+                gap: 2px 5px;      /* Small gap between items */
+                
+                /* These are for the text inside */
+                color: white;
+                font-size: 0.9em;
+            }
+
+            .status-item {
+                display: flex;
+                align-items: center;
+                justify-content: flex-start; /* Left-align text */
+                white-space: nowrap; /* Prevent text from wrapping */
+                overflow: hidden;
+            }
+
+            .status-item .icon {
+                margin-right: 5px;
+                font-weight: bold;
+                color: #ccc; /* Makes the icon a slightly lighter gray */
+            }
+                        
+            #compass-pointer {
+                /* position: absolute; */
+                width: 45%; 
+                height: 45%;
+                /* grid-column: 3; */
+                /* grid-row: 4; */
+            }
+
+
+            #compass-text {
+                color: white;
+                font-weight: bold;
+                font-size: 0.7em; /* Adjust size as needed */
+                z-index: 10;     /* Keeps text on top of the arrow */
+                margin-top: 45%;
+            }
+
+            .compass-letter {
+                position: absolute; /* This pulls them out of the grid flow */
+                color: white;
+                font-weight: bold;
+                font-size: 1.3em; /* A bit smaller than the main heading */
+                z-index: 1; /* Sits above the arrow, but below the number */
+            }
+
+            #compass-n {
+                top: 3%;           /* 10% from the top */
+                left: 50%;          /* 50% from the left */
+                transform: translateX(-50%); /* Centers it horizontally */
+            }
+
+            #compass-s {
+                bottom: 3%;        /* 10% from the bottom */
+                left: 50%;
+                transform: translateX(-50%); /* Centers it horizontally */
+            }
+
+            #compass-w {
+                top: 50%;           /* 50% from the top */
+                left: 3%;          /* 10% from the left */
+                transform: translateY(-50%); /* Centers it vertically */
+            }
+
+            #compass-e {
+                top: 50%;
+                right: 3%;         /* 10% from the right */
+                transform: translateY(-50%); /* Centers it vertically */
+            }
+
+            #fire-alert-label {
+                background-color: rgb(204, 44, 44);
+                color: rgb(34, 34, 34);
+                text-align: center;
+                align-items: center;
+                padding: 8px;
+                font-size: 24px;
+                font-weight: bold;
+                border-radius: 8px;
+                z-index: 1001; /* Ensure it's on top of other elements */
+
+                display: none; /* Hidden by default */
+                position: absolute;
+                top: 3vh;
+                left: 20%;
+                width: 60%;
+                height: 6%;
+                overflow:hidden;
+                z-index:1002;
+                
+            }
+
+
+        </style>
+    <head>
+
+    <body>
+        <div id="overall">
+
+            <div id="fire-alert-label">FIRE DETECTED</div>
+
+            <div id="upper">
+                <div id="row">
+                    <div id="left">
+                        <img src="/rgb_feed" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                    <div id="right">
+                        <img src="/ir_feed" style="width:100%; height:100%; object-fit:cover;">
+                    </div>
+                </div>
+            </div>
+
+            <div id="lower">
+                <div id="row">
+                    <div id="map">
+                        <div id="legend"> 
+                                <div class="status-item"> 
+                                    <div class="legend-dot"></div> <span>: Detections</span> 
+                                </div>
+                                <div class="status-item"> 
+                                    <span class="icon">🔥</span> 
+                                    <span>: Avg. Fire</span> 
+                                </div>
+
+                        </div>
+
+                        <div id="leaflet-map" style="width:100%; height:100%;"></div>
+                        <div id="click-layer-map" onclick="changeView()"></div>
+                        <div id="mini-rgb">
+                            <img src="/rgb_feed" style="width:100%; height:100%; object-fit:cover;" onclick="changeView()">
+                        </div>  
+
+                        <div id="map-status"> 
+
+                        <div class="status-item">
+                                <span class="icon">⏱</span>
+                                <span id="status-time">00:00:00</span>
+                            </div>
+                            <div class="status-item">
+                                <div class="legend-dot"></div> 
+                                <span id="status-fire-count">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="icon">LAT:</span>
+                                <span id="status-fire-lat">0.00000</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="icon">LON:</span>
+                                <span id="status-fire-lon">0.00000</span>
+                            </div>
+
+                        </div>
+
+                        <div id="compass">
+
+                            <div class="compass-letter" id="compass-n">N</div>
+                            <div class="compass-letter" id="compass-e">E</div>
+                            <div class="compass-letter" id="compass-s">S</div>
+                            <div class="compass-letter" id="compass-w">W</div>
+                            <svg id="compass-pointer" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                                <polygon points="10,0 15,20 5,20" fill="#CC2C2C"/>
+                            </svg>
+                            <div id="compass-text">0°</div>
+
+                        </div>
+                    </div>
+
+                    <div id="console">
+                        
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+
+        <!-- Function script -->
+        <script>
+            var mode = 1;
+            let map;
+            let robotMarker;
+            let lastPosition, lastheading;
+            var fireCount = 0;
+            var listfire = [];
+            let fireAlertTimer = null;
+
+
+            function droneIconHtml(heading) {
+                const svg = `
+                <svg viewBox="-12 -12 24 24" width="48" height="48" xmlns="http://www.w3.org/2000/svg">
+                    <g transform="rotate(${heading || 0})">
+                    <path d="M0 -8 L4 6 L0 3 L-4 6 Z" fill="#00ff66" stroke="#003300" stroke-width="0.4"/>
+                    </g>
+                </svg>`;
+                return L.divIcon({ className: 'drone-icon', html: svg, iconSize: [30, 30], iconAnchor: [15, 15] });
+            }
+
+            function changeView() {
+                if (mode % 2 == 1) {
+                    document.getElementById('mini-rgb').style.display = 'block';
+                    document.getElementById('upper').style.display = 'none';
+                    document.getElementById('upper').style.height = '0vh';
+                    document.getElementById('click-layer-map').style.display = 'none';
+                    document.getElementById('lower').style.height = '100vh';
+                    document.getElementById('console').style.display = 'none';
+                    document.getElementById('map').style.width = '100vw';
+                    document.getElementById('compass').style.display = 'grid';
+                    document.getElementById('map-status').style.display = 'grid';
+                    document.getElementById('legend').style.display = 'grid';
+
+                } else {
+                    document.getElementById('mini-rgb').style.display = 'none';
+                    document.getElementById('upper').style.display = 'block';
+                    document.getElementById('upper').style.height = '75vh';
+                    document.getElementById('click-layer-map').style.display = 'block';
+                    document.getElementById('lower').style.height = '25vh';
+                    document.getElementById('console').style.display = 'block';
+                    document.getElementById('map').style.removeProperty('width');
+                    document.getElementById('compass').style.display = 'none';
+                    document.getElementById('map-status').style.display = 'none';
+                    document.getElementById('legend').style.display = 'none';
+
+                    const consoleDiv = document.getElementById('console');
+
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+
+                }  
+
+                mode = mode + 1;
+
+                setTimeout(() => {
+                    map.invalidateSize();
+                }, 15);
+
+                // if (robotMarker) {
+                //     map.setView(robotMarker);
+                // }
+                // if (listfire.length > 1) {
+                //     map.fitBounds(listfire);
+                // }
+            }
+
+            function logToConsole(text) {
+
+                const consoleDiv = document.getElementById('console');
+
+                const shouldScroll = consoleDiv.scrollTop + consoleDiv.clientHeight >= consoleDiv.scrollHeight - 5;
+                const line = document.createElement("div");
+                line.textContent =  `[${new Date().toLocaleTimeString()}] ${text}`;
+                consoleDiv.appendChild(line);
+
+                if (shouldScroll) {
+                    consoleDiv.scrollTop = consoleDiv.scrollHeight;
+                }
+            }
+
+            // var iteration = 0; 
+
+                const fireIcon = L.icon({
+                    iconUrl: 'https://images.emojiterra.com/google/android-11/512px/1f525.png',
+                    iconSize: [32, 32],    // [width, height] in pixels
+                    iconAnchor: [16, 16],  // anchor point (center of the image)
+                    popupAnchor: [0, -16]  // where popup opens relative to the icon
+                });
+
+            async function fetchData() {
+
+                const res = await fetch("/status_text");
+
+                if (!res.ok) {
+                    logToConsole(`Error: Status ${res.status} when fetching /status_text`);
+                    return;
+                }
+
+                const data = await res.json();
+                const pos = data.coordinates;
+                const heading = data.head;
+                var firecoords = data.firecoords;
+                const fire = data.fire;
+
+                const lat = pos.air_lat;
+                const lon = pos.air_lon;
+                if (lat != null && lon != null) {
+                    if (lat != null && lon != null) {
+                        const latlng = [lat, lon];
+                        if (robotMarker) { 
+                            robotMarker.setLatLng(latlng);
+                            robotMarker.setIcon(droneIconHtml(heading || 0)); // <-- Add this line
+                        }
+                        map.panTo(latlng, {
+                            duration: 0.4
+                        });
+                    }
+                }
+
+
+                // NEW PART
+
+                const totalSeconds = Math.floor(data.time_elapsed || 0);
+                const minutes = Math.floor(totalSeconds / 60);
+                const seconds = totalSeconds % 60;
+                const timeElapsed = String(minutes).padStart(2, '0') + ':' + String(seconds).padStart(2, '0');
+
+                const fireCount = data.fire_count || 0;
+                const fireLat = data.avg_firecoords.avg_fire_lat || 0.0;
+                const fireLon = data.avg_firecoords.avg_fire_lon || 0.0;
+
+                // Update the text content of the spans
+                document.getElementById('status-time').textContent = timeElapsed;
+                document.getElementById('status-fire-count').textContent = fireCount;
+                // .toFixed(5) formats the numbers nicely
+                document.getElementById('status-fire-lat').textContent = fireLat.toFixed(5);
+                document.getElementById('status-fire-lon').textContent = fireLon.toFixed(5);
+                // NEW PART
+
+                if (fireCount > 1) {
+                    afLat = data.avg_firecoords.avg_fire_lat
+                    afLon = data.avg_firecoords.avg_fire_lon
+                    avgLat = afLat
+                    avgLon = afLon
+                    
+                    if (window.avgMarker) {
+                    map.removeLayer(window.avgMarker);
+                    }
+                    window.avgMarker = L.marker([afLat, afLon], { icon: fireIcon }).addTo(map).bindPopup("🔥 Fire Detected");
+                }
+
+
+                // if (fire && firecoords.length > 0 || iteration == 0) {
+                const newFireArrays = firecoords.map(obj => [obj.fire_lat, obj.fire_lon]);
+                const currentFiresSet = new Set(newFireArrays.map(coords => coords.join(',')));
+                const oldFiresSet = new Set(listfire.map(coords => coords.join(',')));
+                const newFireStrings = difference(currentFiresSet, oldFiresSet);
+
+                if (newFireStrings.size > 0) {
+                    for (const coordsArray of newFireArrays) {
+                        const coordString = coordsArray.join(',');
+                        
+                        if (newFireStrings.has(coordString)) {    
+                            L.circleMarker(coordsArray, {
+                            radius: 4,        // Size of the circle
+                            weight: 2,        // Outline thickness (set to 1 so the red outline is visible)
+                            color: 'red',     // Outline color
+                            fillColor: '#CC2C2C', // Fill color (you can also use 'red')
+                            fillOpacity: 0.5  // Opacity (0.3 is very light, 0.5 is good)
+                            }).addTo(map);
+
+                            logToConsole(`Logging fire at: ${coordString}`);
+
+                            listfire.push(coordsArray); 
+                        }
+                    }
+                }
+
+                if (fire) {
+                    document.getElementById('fire-alert-label').style.display = 'block';
+
+                    if (fireAlertTimer) {
+                        clearTimeout(fireAlertTimer);
+                    }
+
+                    fireAlertTimer = setTimeout(() => {
+                        document.getElementById('fire-alert-label').style.display = 'none';
+                        fireAlertTimer = null; 
+                    }, 1000); 
+                } 
+
+                // iteration = 1;
+                const mapUpdateData = {
+                air_lat: pos ? pos.air_lat : null, 
+                air_lon: pos ? pos.air_lon : null,
+                heading: heading 
+                };
+
+                if (mapUpdateData.air_lat != null && mapUpdateData.air_lon != null && 
+                    (!lastPosition || mapUpdateData.air_lat !== lastPosition.air_lat || mapUpdateData.air_lon !== lastPosition.air_lon || heading !== lastheading)) {
+                    updateMapFromPosition(mapUpdateData); 
+                    lastPosition = mapUpdateData; 
+                    lastheading = heading;
+                }
+            
+            }
+
+            function updateMapFromPosition(pos) {
+                if (!pos) return;
+                const lat = pos.air_lat;
+                const lon = pos.air_lon;
+                const heading = pos.heading;
+
+                const compassPointer = document.getElementById('compass-pointer');
+                const compassText = document.getElementById('compass-text');
+
+                if (compassPointer && compassText) {
+                    compassPointer.style.transform = `rotate(${heading || 0}deg)`;
+                    compassText.textContent = `${Math.round(heading || 0)}°`;
+                }
+
+            }
+
+
+            function difference(setA, setB) {
+                const _difference = new Set(setA);
+                for (const elem of setB) {
+                    _difference.delete(elem); // Just remove elements from B, never add them
+                }
+                return _difference;
+            }
+        </script>
+
+
+        <!-- Run once and then repeat Script -->
+        <script>
+
+            // Run once code
+            map = L.map('leaflet-map').setView([38.5493213, -76.9537231], 17);
+
+            L.tileLayer('https://{s}.google.com/vt/lyrs=s,h&x={x}&y={y}&z={z}', {
+                maxZoom: 20,
+                subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+            }).addTo(map);
+            
+            robotMarker = L.marker([38.5493213, -76.9537231], { 
+                icon: droneIconHtml(0),
+                zIndexOffset: 1000
+            }).addTo(map);
+
+
+            let counter = 0;
+
+
+            // Repeat script
+            setInterval(() => {
+                counter++;
+                fetchData();
+                // logToConsole(counter); 
+                }, 25);
+
+
+
+        </script>
+        
+
+
+
+
+
+
+
+
+
+
+<!-- 
+
+
+
+        
+        <!-- PURELY FOR DRONE SIMULATION FOR TESTING -->
+        <script>
+            // This function sends the key press to your Flask server
+            async function sendCommand(key, action) {
+                try {
+                    await fetch('/command', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            key: key,
+                            action: action
+                        }),
+                    });
+                } catch (error) {
+                    console.error('Error sending command:', error);
+                }
+            }
+
+            // Listen for key presses (keydown)
+            document.addEventListener('keydown', (event) => {
+                // We use event.key to get the character
+                switch (event.key) {
+                    case 'w':
+                        // console.log('W pressed');
+                        sendCommand('w', 'down');
+                        break;
+                    case 'a':
+                        // console.log('A pressed');
+                        sendCommand('a', 'down');
+                        break;
+                    case 's':
+                        // console.log('S pressed');
+                        sendCommand('s', 'down');
+                        break;
+                    case 'd':
+                        // console.log('D pressed');
+                        sendCommand('d', 'down');
+                        break;
+                    case ' ':
+                        // console.log('space pressed');
+                        // logToConsole("Space down");
+                        event.preventDefault();
+                        sendCommand('space', 'down');
+                        break;
+
+                }
+            });
+
+            // --- This part is CRITICAL for drone movement ---
+            // Listen for when the key is released (keyup)
+            document.addEventListener('keyup', (event) => {
+                switch (event.key) {
+                    case 'w':
+                        // console.log('W released');
+                        sendCommand('w', 'up'); // Tell the server to stop
+                        break;
+                    case 'a':
+                        // console.log('A released');
+                        sendCommand('a', 'up');
+                        break;
+                    case 's':
+                        // console.log('S released');
+                        sendCommand('s', 'up');
+                        break;
+                    case 'd':
+                        // console.log('D released');
+                        sendCommand('d', 'up');
+                        break;
+                    case ' ':
+                        // console.log('space released');
+                        // logToConsole("Space up");
+                        event.preventDefault();
+                        sendCommand('space', 'up');
+                        break;
+                }
+            });
+        </script> -->
+
+    </body>
+</html>
