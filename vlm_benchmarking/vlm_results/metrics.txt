@@ -1,0 +1,8 @@
+WEB09234.jpg	SmokeIoU=0.9219	FireIoU=0.0000	InferenceTimeSec=7.8637	FireBoxes=[[0.0, 146.0, 1007.0, 394.0]]	SmokeBoxes=[[0.0, 0.0, 1007.0, 394.0]]
+
+===== SUMMARY =====
+Images processed: 1
+Avg inference time per image: 7.8637 sec
+Fire:   TP=0 FP=1 FN=0 Precision=0.00000000000000000000000000000000000000000000 Recall=0.0000 MeanIoU=0.0000 AP≈0.0000
+Smoke:  TP=1 FP=0 FN=0 Precision=1.0000 Recall=1.0000 MeanIoU=0.9219 AP≈1.0000
+mAP@0.5 (Fire, Smoke avg): 0.5000
