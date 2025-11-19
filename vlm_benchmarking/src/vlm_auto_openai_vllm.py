@@ -33,7 +33,7 @@ load_dotenv()
 
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "dummy-key")   # vLLM doesn't validate
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-0.6B")  # or your VLM model
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "leon-se/ForestFireVLM-3B")  # or your VLM model
 
 client = OpenAI(
     base_url=OPENAI_BASE_URL,
