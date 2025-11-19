@@ -2,15 +2,16 @@ import os
 import json
 import re
 import time
+from vllm import LLM, SamplingParams
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
 import json
 from json_repair import repair_json
-from huggingface_hub import login
-from dotenv import load_dotenv
+# from huggingface_hub import login
+# from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 import torch
-from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
+# from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 
 # -----------------------------
 # 0) PATHS / CONFIG
@@ -86,26 +87,17 @@ def build_conversation_for_fire(image: Image.Image):
     }]
     return conversation
 
-
-# -----------------------------
-# 2) HF LOGIN + MODEL / PROCESSOR
-# -----------------------------
-load_dotenv()
-hf_token = os.getenv("HF_TOKEN")
-
-if hf_token:
-    login(hf_token)
-    print("Successfully logged in to Hugging Face!")
-else:
-    print("HF_TOKEN not found in .env; proceeding without login (public model only).")
-
 model_id = "leon-se/ForestFireVLM-3B"
+llm = LLM(model=model_id,
+            trust_remote_code=True,
+            dtype="auto")
+sampling_params = SamplingParams(max_tokens=128)
 
-processor = AutoProcessor.from_pretrained(model_id)
-model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-model.eval()
+# processor = AutoProcessor.from_pretrained(model_id)
+# model = Qwen2_5_VLForConditionalGeneration.from_pretrained(model_id)
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# model.to(device)
+# model.eval()
 
 
 # -----------------------------
@@ -135,24 +127,24 @@ def run_vlm_on_image(image: Image.Image) -> Dict:
     """Run the VLM and return parsed JSON with fires/smoke."""
     conversation = build_conversation_for_fire(image)
 
-    prompt = processor.apply_chat_template(
-        conversation,
-        add_generation_prompt=True,
-        tokenize=False,
+    prompt = (
+        "USER: <image>\n"
+        f"{conversation}\n"
+        "ASSISTANT:"
     )
 
-    inputs = processor(
-        text=[prompt],
-        images=[image],
-        return_tensors="pt"
-    ).to(device)
+    outputs = llm.generate(
+        {
+            "prompt":prompt,
+            "multi_modal_data": {
+                "image": image,
+            },
+        },
+        sampling_params=sampling_params,
+    )
 
-    with torch.no_grad():
-        output_ids = model.generate(**inputs, max_new_tokens=128)
+    text = outputs[0].outputs[0].text
 
-    gen_ids = output_ids[0, inputs.input_ids.shape[-1]:]
-    text = processor.decode(gen_ids, skip_special_tokens=True, clean_up_tokenization_spaces=True)
-    print(text)
     result = extract_json_obj(text)
 
     # Normalize keys: we expect each item to have "bbox" OR "bbox_2d"
