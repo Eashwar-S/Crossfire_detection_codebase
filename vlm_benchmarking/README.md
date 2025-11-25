@@ -20,7 +20,7 @@ python3 vlm_auto.py
 ### Running with VLLM and Openai endpoint
 1. Run the docker container first in a separate terminal and do not change this terminal
 ```
-docker run --runtime nvidia --gpus all     -v ~/.cache/huggingface:/root/.cache/huggingface     --env "HF_TOKEN=$ENTER YOUR HUGGING FACE TOKEN HERE$"     -p 8000:8000  --env "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas"    --ipc=host     vllm/vllm-openai:latest     --model leon-se/ForestFireVLM-3B
+docker run --runtime nvidia --gpus all     -v ~/.cache/huggingface:/root/.cache/huggingface     --env "HF_TOKEN=$ENTER YOUR HUGGING FACE TOKEN HERE$     -p 8000:8000  --env "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas"    --ipc=host  nvcr.io/nvidia/vllm:25.10-py3  vllm serve model_name
 
 ```
 
