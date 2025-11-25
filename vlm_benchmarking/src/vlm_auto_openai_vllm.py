@@ -1,3 +1,43 @@
+'''
+Terminal 1 run:
+export MODEL_HANDLE="nvidia/Qwen2.5-VL-7B-Instruct-FP4"
+
+docker run --name trtllm_vlm_server --rm -it --gpus all --ipc host --network host \
+-e HF_TOKEN=$HF_TOKEN \
+-e MODEL_HANDLE="$MODEL_HANDLE" \
+-v $HOME/.cache/huggingface/:/root/.cache/huggingface/ \
+nvcr.io/nvidia/tensorrt-llm/release:spark-single-gpu-dev \
+bash -c '
+    hf download $MODEL_HANDLE && \
+    cat > /tmp/extra-llm-api-config.yml <<EOF
+print_iter_log: false
+kv_cache_config:
+dtype: "auto"
+free_gpu_memory_fraction: 0.9
+cuda_graph_config:
+enable_padding: true
+disable_overlap_scheduler: true
+EOF
+    trtllm-serve "$MODEL_HANDLE" \
+    --max_batch_size 4 \
+    --trust_remote_code \
+    --port 8355 \
+    --extra_llm_api_options /tmp/extra-llm-api-config.yml
+
+
+Terminal 2 run:
+cd Crossfire_detection_codebase/vlm_benchmarking/src/
+source .venv/bin/activate
+
+    or you may have to do:
+        python3 -m venv .venv
+        source .venv/bin/activate
+        python -m pip install --upgrade pip
+
+python3 vlm_auto_openai_vllm_modified.py
+'''
+
+from email.mime import image
 import os
 import io
 import json
@@ -6,12 +46,15 @@ import time
 import base64
 from dataclasses import dataclass
 from typing import List, Tuple, Dict
+from unittest import result
 
+#from cbor2 import key
 from json_repair import repair_json
 from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 
 from openai import OpenAI
+from torch import norm
 
 # -----------------------------
 # 0) PATHS / CONFIG
@@ -31,9 +74,14 @@ IOU_THRESHOLD = 0.5  # For TP/FP and mAP
 # -----------------------------
 load_dotenv()
 
-OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")   # used to be just http://localhost:8355
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "dummy-key")   # vLLM doesn't validate
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "leon-se/ForestFireVLM-3B")  # or your VLM model
+# OPENAI_MODEL = os.getenv("OPENAI_MODEL", "leon-se/ForestFireVLM-3B")  # or your VLM model
+# OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen2.5-VL-7B-Instruct")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "Qwen/Qwen3-VL-30B-A3B-Instruct")
+
+
+
 
 client = OpenAI(
     base_url=OPENAI_BASE_URL,
@@ -75,10 +123,10 @@ Bounding boxes:
 
 Rules:
 {coord_rules}
-If there is no fire, set "FirePresent": "No" and "fires": [].
-If there is no smoke, set "SmokePresent": "No" and "smoke": [].
+- If there is no fire, set "FirePresent": "No" and "fires": [].
+- If there is no smoke, set "SmokePresent": "No" and "smoke": [].
 
-Return a SINGLE JSON object only.
+You must respond with a SINGLE JSON object only.
 Do NOT include any text outside the JSON.
 Use EXACT field names and value strings.
 
@@ -96,11 +144,20 @@ def extract_json_obj(text: str) -> dict:
     Extract first JSON object from model text output and repair if needed.
     """
     match = re.search(r"\{.*\}", text, re.DOTALL)
+
     if not match:
         raise ValueError("No JSON object found in model output.")
     json_str = match.group(0)
-    repaired_json = repair_json(json_str)
-    return json.loads(repaired_json)
+    # repaired_json = repair_json(json_str)
+    # return json.loads(repaired_json)
+    try:
+        repaired_json = repair_json(json_str)
+        return json.loads(repaired_json)
+    except Exception as e:
+        raise ValueError(f"JSON repair/loading failed: {e}. String: {json_str[:100]}...")
+    
+
+
 
 
 def pil_to_base64_jpeg(image: Image.Image) -> str:
@@ -147,23 +204,57 @@ def run_vlm_on_image(image: Image.Image) -> Dict:
     response = client.chat.completions.create(
         model=OPENAI_MODEL,
         messages=messages,
-        max_tokens=256,
+        max_tokens=128,#8192
+        response_format={"type": "json_object"},
         temperature=0.0,
     )
 
     text = response.choices[0].message.content
     print(text)
 
+    # result = extract_json_obj(text)
+
+    # # Normalize keys: we expect each item to have "bbox" OR "bbox_2d"
+    # for key in ("fires", "smoke"):
+    #     if key in result and isinstance(result[key], list):
+    #         for item in result[key]:
+    #             if "bbox" not in item and "bbox_2d" in item:
+    #                 item["bbox"] = item["bbox_2d"]
+
+    # return result
+
     result = extract_json_obj(text)
 
-    # Normalize keys: we expect each item to have "bbox" OR "bbox_2d"
+    def _normalize_boxes(lst):
+        """Accepts list of dicts or list of plain [x_min, y_min, x_max, y_max] lists."""
+        norm = []
+        for item in lst:
+        # Case 1: {"bbox": [...]}
+            if isinstance(item, dict) and "bbox" in item:
+                norm.append({"bbox": item["bbox"]})
+        # Case 2: {"bbox_2d": [...]}
+            elif isinstance(item, dict) and "bbox_2d" in item:
+                norm.append({"bbox": item["bbox_2d"]})
+        # Case 3: raw list [x_min, y_min, x_max, y_max]
+            elif isinstance(item, (list, tuple)) and len(item) == 4:
+                norm.append({"bbox": list(item)})
+        # else: ignore weird items
+        return norm
+
     for key in ("fires", "smoke"):
         if key in result and isinstance(result[key], list):
-            for item in result[key]:
-                if "bbox" not in item and "bbox_2d" in item:
-                    item["bbox"] = item["bbox_2d"]
+            result[key] = _normalize_boxes(result[key])
 
+# Optional: enforce FirePresent / SmokePresent consistency
+    fp = result.get("FirePresent", "").lower()
+    sp = result.get("SmokePresent", "").lower()
+    if fp == "no":
+        result["fires"] = []
+    if sp == "no":
+        result["smoke"] = []
     return result
+
+    
 
 
 # -----------------------------
@@ -292,8 +383,20 @@ def main():
         stem, _ = os.path.splitext(img_name)
         label_path = os.path.join(LABELS_DIR, stem + ".txt")
 
-        image = Image.open(img_path).convert("RGB")
-        img_w, img_h = image.size
+        # image = Image.open(img_path).convert("RGB")
+        # img_w, img_h = image.size
+
+# this is a new addition to resize images to 1024x1024 for VLM input ---------------------------
+        orig_image = Image.open(img_path).convert("RGB")
+        orig_w, orig_h = orig_image.size
+
+# Canonical size for model + evaluation
+        CANONICAL_W, CANONICAL_H = 1024, 960
+
+# Resize original image to canonical size
+        image = orig_image.resize((CANONICAL_W, CANONICAL_H), Image.BICUBIC)
+        img_w, img_h = image.size  # will be (1024, 1024)
+
 
         # ---- Run VLM ----
         start = time.perf_counter()
@@ -309,6 +412,19 @@ def main():
         num_inferred += 1
 
         # ---- Get predicted boxes ----
+        # pred_fire_boxes = []
+        # pred_smoke_boxes = []
+
+        # for item in result.get("fires", []):
+        #     box = item.get("bbox")
+        #     if box and len(box) == 4:
+        #         pred_fire_boxes.append(list(map(float, box)))
+
+        # for item in result.get("smoke", []):
+        #     box = item.get("bbox")
+        #     if box and len(box) == 4:
+        #         pred_smoke_boxes.append(list(map(float, box)))
+
         pred_fire_boxes = []
         pred_smoke_boxes = []
 
@@ -320,7 +436,8 @@ def main():
         for item in result.get("smoke", []):
             box = item.get("bbox")
             if box and len(box) == 4:
-                pred_smoke_boxes.append(list(map(float, box)))
+                pred_smoke_boxes.append(list(map(float, box)))  
+
 
         # ---- Load GT boxes (YOLO) ----
         gt_all = load_yolo_labels(label_path, img_w, img_h)
