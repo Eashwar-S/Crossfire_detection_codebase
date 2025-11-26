@@ -18,8 +18,8 @@ from openai import OpenAI
 # -----------------------------
 IMAGES_DIR = "../dataset/images"
 LABELS_DIR = "../dataset/labels"     # ground-truth labels
-OUT_IMAGE_DIR = "../vlm_3B_results/images"
-METRICS_PATH = "../vlm_3B_results/metrics.txt"
+OUT_IMAGE_DIR = "../vlm_30B_results/images"
+METRICS_PATH = "../vlm_30B_results/metrics.txt"
 
 os.makedirs(OUT_IMAGE_DIR, exist_ok=True)
 os.makedirs(os.path.dirname(METRICS_PATH), exist_ok=True)
@@ -33,7 +33,7 @@ load_dotenv()
 
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:8000/v1")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "dummy-key")   # vLLM doesn't validate
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "leon-se/ForestFireVLM-3B")  # or your VLM model
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "ig1/Qwen3-VL-30B-A3B-Instruct-NVFP4")  # or your VLM model
 
 client = OpenAI(
     base_url=OPENAI_BASE_URL,
@@ -294,8 +294,6 @@ def main():
 
         image = Image.open(img_path).convert("RGB")
         img_w, img_h = image.size
-        print(f"\nProcessing image: {img_name} (size: {img_w}x{img_h})")
-
 
         # ---- Run VLM ----
         start = time.perf_counter()
