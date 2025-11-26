@@ -47,6 +47,10 @@ _bbox_avg = {"n": 0, "sum_lat": 0.0, "sum_lon": 0.0}
 _CLUSTERED_AVG_LOG  = "detections_avg_clustered.txt"
 _CLUSTERED_WAVG_LOG = "detections_wavg_clustered.txt"
 
+YOLO_TRIGGER_COUNT = 10
+_yolo_detection_count = 0
+_vlm_frames = []
+
 # Running aggregates (for LRF target)
 _avg_acc  = {"n": 0, "sum_lat": 0.0, "sum_lon": 0.0}
 _wavg_acc = {"sum_w": 0.0, "sum_w_lat": 0.0, "sum_w_lon": 0.0}
@@ -636,6 +640,34 @@ def _get_yolo_boxes_dup(model: YOLO, frame_bgr: np.ndarray, imgsz: int, conf: fl
     # (kept to avoid changing your previous structure elsewhere if referenced)
     return _get_yolo_boxes(model, frame_bgr, imgsz, conf, classes, rect, device)
 
+import random
+
+def _send_frames_to_vlm(frames):
+    """
+    Placeholder for calling the VLM on a batch of frames.
+    """
+   # Simulate API processing delay
+    time.sleep(0.5)
+
+    # Fake decision logic
+    is_fire = random.random() < 0.8   # pretend 80% chance frames show fire
+    confidence = round(random.uniform(0.75, 0.98), 3)
+
+    explanation = (
+        "The model observes bright orange regions and rising smoke "
+        "over multiple frames, consistent with an active fire."
+        if is_fire else
+        "The model does not observe consistent flame or smoke patterns."
+    )
+
+    return {
+        "fire_detected": is_fire,
+        "confidence": confidence,
+        "explanation": explanation,
+        "severity": "high" if is_fire and confidence > 0.9 else "moderate",
+    }
+
+
 # ---------- Main ----------
 def main():
     ap = argparse.ArgumentParser(description="RTMP split (IR|RGB) with YOLO (RGB) + IR HSV thresholding + MQTT LRF logging")
@@ -682,6 +714,8 @@ def main():
         return tuple(vals)
     hsv_lo = _triple(args.ir_hsv_lower)
     hsv_hi = _triple(args.ir_hsv_upper)
+
+    global _yolo_detection_count, _vlm_frames
 
     model = load_yolo(args.weights, args.imgsz, is_pt_hint=True)
 
@@ -764,10 +798,27 @@ def main():
                 if has_intersection:
                     break
 
-            if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None:
+            if has_intersection and _latest["lrf_lat"] is not None and _latest["lrf_lon"] is not None: 
+
                 print(f"----> INTERSECTION + LRF target at frame {frame_id} -> logging to detections.txt")
                 # REPLACED CALL: use the richer logger that includes bbox in detections.txt
                 _log_detection_with_bbox(frame_id, first_matching_yolo_box)
+
+                if len(yolo_boxes) > 0:
+                    _yolo_detection_count += 1
+
+                    _vlm_frames.append(rgb_anno.copy()) 
+
+                    if _yolo_detection_count  >= YOLO_TRIGGER_COUNT:
+                        print("sending to vlm.....")
+
+
+                        result = _send_frames_to_vlm(_vlm_frames)
+                        _vlm_frames.clear()
+                        _yolo_detection_count = 0
+                else:
+                    _yolo_detection_count = 0
+                    _vlm_frames.clear()
 
                 avg = _update_running_average(_latest["lrf_lat"], _latest["lrf_lon"])
                 if avg is not None:
