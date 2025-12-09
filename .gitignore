@@ -1,4 +1,6 @@
 .env
 nvidia_fp8_fixed/
 vlm_benchmarking/vlm_*/
+vlm_benchmarking/ffvlm_*/
+
 
