@@ -5,7 +5,7 @@ import base64
 import time
 from dataclasses import dataclass
 from typing import List, Tuple
-
+import io
 from PIL import Image, ImageDraw, ImageFont
 from vllm import LLM, SamplingParams
 
@@ -21,11 +21,28 @@ OUT_IMAGE_DIR = "/dataset/vlm_3B_results/images"  # will store VLM bbox images h
 METRICS_PATH = "dataset/vlm_3B_results/metrics.txt"
 
 IOU_THRESHOLD = 0.5  # For TP/FP and IoU-based metrics
+MAX_IMAGE_LONG_SIDE = 640  # or 448; smaller = faster, but don’t go too tiny
 
+def resize_image_keep_aspect(img: Image.Image, max_side: int = MAX_IMAGE_LONG_SIDE):
+    """
+    Resize image so that the longer side <= max_side, keeping aspect ratio.
+    Returns (resized_image, scale_factor).
+    scale_factor = resized_size / original_size (same for x and y).
+    """
+    w, h = img.size
+    scale = min(max_side / w, max_side / h, 1.0)
+    if scale >= 1.0:
+        return img, 1.0  # no upscaling
+    new_w = int(w * scale)
+    new_h = int(h * scale)
+    resized = img.resize((new_w, new_h), Image.BILINEAR)
+    return resized, scale
 
-# -----------------------------
-# 2) PROMPT + HELPERS
-# -----------------------------
+def encode_pil_to_base64(img: Image.Image) -> str:
+    """Encode a PIL.Image to base64 JPEG string (no need to touch disk)."""
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG")
+    return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 def build_fire_prompt(img_w: int, img_h: int) -> str:
     coord_rules = (
@@ -272,7 +289,7 @@ def main():
         model=MODEL_PATH,
         trust_remote_code=True,
         tensor_parallel_size=1,
-        max_model_len=2048,
+        max_model_len=1024,
         gpu_memory_utilization=0.9,
         dtype="float16",
         limit_mm_per_prompt={"image": 1},
@@ -321,21 +338,30 @@ def main():
 
             print(f"\n--- {img_file} ---")
 
+            image = Image.open(img_path).convert("RGB")
+
+
             try:
                 image = Image.open(img_path).convert("RGB")
             except Exception as e:
                 print(f"Skipping {img_file}: {e}")
                 continue
 
-            img_w, img_h = image.size
+            # 1) Resize image for the VLM (same aspect ratio, smaller resolution)
+            image_resized, scale = resize_image_keep_aspect(image)
+            # img_w, img_h = image_resized.size
+
+            # # 2) Build prompt using *resized* dimensions
+            # prompt_text = build_fire_prompt(img_w, img_h)
+
+            # # 3) Encode the *resized* image, not the original
+            # b64_img = encode_pil_to_base64(image_resized)
+            # data_url = f"data:image/jpeg;base64,{b64_img}"
+            img_w, img_h = image_resized.size
             prompt_text = build_fire_prompt(img_w, img_h)
 
             # Encode image as base64
-            s_t = time.time()
-            b64_img = encode_image_to_base64(img_path)
-            e_t = time.time()
-            encode_time = e_t - s_t
-            print(f"Image encoding time: {encode_time:.3f} seconds")
+            b64_img = encode_pil_to_base64(image_resized)
 
             data_url = f"data:image/jpeg;base64,{b64_img}"
 
@@ -427,7 +453,7 @@ def main():
             # -----------------------------
             # Draw prediction image and SAVE it
             # -----------------------------
-            pred_img = image.copy()
+            pred_img = image_resized.copy()
             draw_pred = ImageDraw.Draw(pred_img)
 
             try:
