@@ -29,3 +29,10 @@ docker run --runtime nvidia --gpus all     -v ~/.cache/huggingface:/root/.cache/
 cd vlm_benchmarking/src
 python3 vlm_auto_openai_vllm.py
 ```
+
+3. To run without openai endpoint
+```
+$ cd vlm_benchmarking/src
+$ docker run --runtime nvidia --gpus all -e DISPLAY=$DISPLAY   -v ~/.cache/huggingface:/root/.cache/huggingface -v "$PWD":/workspace -v /home/crossfire/Crossfire_detection_codebase/vlm_benchmarking/dataset/images:/dataset/images -v /home/crossfire/Crossfire_detection_codebase/vlm_benchmarking/dataset/labels:/dataset/labels -v /home/crossfire/Crossfire_detection_codebase/vlm_benchmarking/vlm_3B_results:/dataset/vlm_3B_results   --env "HF_TOKEN=$ENTER YOUR HUGGING FACE TOKEN HERE$   -p 8000:8000   --env "TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas"   --ipc=host   nvcr.io/nvidia/vllm:25.10-py3   python3 /workspace/vlm_auto_openai_vllm_3B_offline.py
+
+```

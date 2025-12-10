@@ -156,7 +156,8 @@ def main():
         trust_remote_code=True,
         tensor_parallel_size=1,
         dtype="float16",
-        limit_mm_per_prompt={"image": 1},
+        # allow up to 8 images per prompt (for batching)
+        limit_mm_per_prompt={"image": 8},
     )
 
     print(f"Scanning images in {IMAGES_DIR}...")
@@ -170,8 +171,11 @@ def main():
     ]
     image_files.sort()
 
-    # Slight optimization: reduce max_tokens since we only need a short JSON
-    sampling_params = SamplingParams(temperature=0.0, max_tokens=256)
+    # Shorter outputs → less decoding time
+    sampling_params = SamplingParams(
+        temperature=0.0,
+        max_tokens=256,
+    )
 
     # Fields to print
     question_fields = [
@@ -183,28 +187,37 @@ def main():
     total_time = 0.0
     num_done = 0
 
-    print(f"Processing {len(image_files)} images one by one...")
+    BATCH_SIZE = 8  # try 4, 8, or 16 depending on VRAMAoF04975.jpg =
+
+    print(f"Processing {len(image_files)} images in batches of {BATCH_SIZE}...")
     with open(OUTPUT_FILE, "w") as f_out:
-        for img_file in image_files:
-            img_path = os.path.join(IMAGES_DIR, img_file)
-            print(f"\n--- {img_file} ---")
+        # process in batches
+        for start_idx in range(0, len(image_files), BATCH_SIZE):
+            batch_files = image_files[start_idx:start_idx + BATCH_SIZE]
 
-            try:
-                image = Image.open(img_path).convert("RGB")
-            except Exception as e:
-                print(f"Skipping {img_file}: {e}")
-                continue
+            messages_batch = []
+            meta_batch = []  # store per-image metadata
 
-            img_w, img_h = image.size
-            prompt_text = build_fire_prompt(img_w, img_h)
+            # ---- Build batch messages ----
+            for img_file in batch_files:
+                img_path = os.path.join(IMAGES_DIR, img_file)
+                print(f"\n--- {img_file} ---")
 
-            # Encode image as base64 and build a data URL
-            b64_img = encode_image_to_base64(img_path)
-            data_url = f"data:image/jpeg;base64,{b64_img}"
+                try:
+                    image = Image.open(img_path).convert("RGB")
+                except Exception as e:
+                    print(f"Skipping {img_file}: {e}")
+                    continue
 
-            # Message supports both 'parts' and 'content' to satisfy the chat template
-            messages = [
-                {
+                img_w, img_h = image.size
+                prompt_text = build_fire_prompt(img_w, img_h)
+
+                # Encode image as base64 and build a data URL
+                b64_img = encode_image_to_base64(img_path)
+                data_url = f"data:image/jpeg;base64,{b64_img}"
+
+                # Message supports both 'parts' and 'content' to satisfy the chat template
+                msg = {
                     "role": "user",
                     "parts": [
                         {"text": prompt_text},
@@ -223,57 +236,72 @@ def main():
                         },
                     ],
                 }
-            ]
 
-            # --- Inference time measurement ---
+                messages_batch.append(msg)
+                meta_batch.append({"file": img_file})
+
+            # if all images in this batch failed to load, skip
+            if not messages_batch:
+                continue
+
+            # ---- Run batched inference ----
             start_t = time.perf_counter()
             try:
-                output = llm.chat(messages, sampling_params)
+                outputs = llm.chat(messages_batch, sampling_params)
             except Exception as e:
-                print(f"Model error on {img_file}: {e}")
+                print(f"Model error on batch starting at {batch_files[0]}: {e}")
                 continue
             end_t = time.perf_counter()
-            infer_time = end_t - start_t
-            total_time += infer_time
-            num_done += 1
 
-            generated_text = output[0].outputs[0].text
+            batch_time = end_t - start_t
+            per_image_time = batch_time / len(outputs)
+            total_time += batch_time
+            num_done += len(outputs)
 
-            # Parse JSON
-            result = extract_json_obj(generated_text)
+            # ---- Handle outputs for each image in the batch ----
+            for meta, out in zip(meta_batch, outputs):
+                img_file = meta["file"]
+                generated_text = out.outputs[0].text
 
-            print(f"=== Result for: {img_file} ===")
-            print(f"InferenceTimeSec: {infer_time:.3f}")
-            if "error" in result:
-                print(f"Error parsing JSON: {result.get('raw_output')}")
-            else:
-                for field in question_fields:
-                    val = result.get(field, "N/A")
-                    print(f"{field}: {val}")
+                result = extract_json_obj(generated_text)
 
-                fires = result.get("fires", [])
-                smoke = result.get("smoke", [])
-                print(
-                    f"Number of fire bboxes: {len(fires) if isinstance(fires, list) else 0}"
-                )
-                print(
-                    f"Number of smoke bboxes: {len(smoke) if isinstance(smoke, list) else 0}"
-                )
-            print("=====================================")
+                print(f"=== Result for: {img_file} ===")
+                print(f"InferenceTimeSec (approx): {per_image_time:.3f}")
+                if "error" in result:
+                    print(f"Error parsing JSON: {result.get('raw_output')}")
+                else:
+                    for field in question_fields:
+                        val = result.get(field, "N/A")
+                        print(f"{field}: {val}")
 
-            # Save per-image record including inference time
-            final_record = {
-                "file": img_file,
-                "inference_time_sec": infer_time,
-                "result": result,
-            }
-            f_out.write(json.dumps(final_record) + "\n")
+                    fires = result.get("fires", [])
+                    smoke = result.get("smoke", [])
+                    print(
+                        f"Number of fire bboxes: "
+                        f"{len(fires) if isinstance(fires, list) else 0}"
+                    )
+                    print(
+                        f"Number of smoke bboxes: "
+                        f"{len(smoke) if isinstance(smoke, list) else 0}"
+                    )
+                print("=====================================")
+
+                final_record = {
+                    "file": img_file,
+                    "inference_time_sec": per_image_time,
+                    "result": result,
+                }
+                f_out.write(json.dumps(final_record) + "\n")
 
     if num_done > 0:
         avg_time = total_time / num_done
-        print(f"\nAverage inference time per image: {avg_time:.3f} sec over {num_done} images")
+        print(
+            f"\nAverage (approx) inference time per image: "
+            f"{avg_time:.3f} sec over {num_done} images"
+        )
 
     print(f"Done! Results saved to {OUTPUT_FILE}")
+
 
 
 if __name__ == "__main__":
