@@ -4,7 +4,8 @@ import re
 import base64
 import time
 
-from PIL import Image
+# [ADDED] Imports for drawing
+from PIL import Image, ImageDraw, ImageFont
 from vllm import LLM, SamplingParams
 
 # -----------------------------
@@ -15,6 +16,14 @@ IMAGES_DIR = "/dataset/images"
 OUTPUT_FILE = "/workspace/results.jsonl"
 MODEL_PATH = "leon-se/ForestFireVLM-7B-FP8-Dynamic"
 
+# [ADDED] Output config for images
+OUT_IMAGE_DIR = "/workspace/vlm_7B_results/images"
+# Ensure the directory exists
+os.makedirs(OUT_IMAGE_DIR, exist_ok=True)
+
+# CONFIG FOR VOTING
+NUM_SAMPLES = 5  # Number of times to query the model per image
+TEMPERATURE = 0.1 # Higher temp needed for diversity
 
 # -----------------------------
 # 2) PROMPT + HELPERS
@@ -156,7 +165,6 @@ def main():
         trust_remote_code=True,
         tensor_parallel_size=1,
         dtype="float16",
-        # allow up to 8 images per prompt (for batching)
         limit_mm_per_prompt={"image": 8},
     )
 
@@ -171,13 +179,12 @@ def main():
     ]
     image_files.sort()
 
-    # Shorter outputs → less decoding time
     sampling_params = SamplingParams(
-        temperature=0.0,
+        temperature=TEMPERATURE,
+        n=NUM_SAMPLES,
         max_tokens=256,
     )
 
-    # Fields to print
     question_fields = [
         "Smoke", "Flames", "Uncontrolled", "FireState", "FireType",
         "FireIntensity", "FireSize", "FireHotspots",
@@ -186,23 +193,17 @@ def main():
 
     total_time = 0.0
     num_done = 0
-
-    BATCH_SIZE = 8  # try 4, 8, or 16 depending on VRAMAoF04975.jpg =
+    BATCH_SIZE = 1
 
     print(f"Processing {len(image_files)} images in batches of {BATCH_SIZE}...")
     with open(OUTPUT_FILE, "w") as f_out:
-        # process in batches
         for start_idx in range(0, len(image_files), BATCH_SIZE):
             batch_files = image_files[start_idx:start_idx + BATCH_SIZE]
-
             messages_batch = []
-            meta_batch = []  # store per-image metadata
+            meta_batch = []
 
-            # ---- Build batch messages ----
             for img_file in batch_files:
                 img_path = os.path.join(IMAGES_DIR, img_file)
-                print(f"\n--- {img_file} ---")
-
                 try:
                     image = Image.open(img_path).convert("RGB")
                 except Exception as e:
@@ -211,40 +212,28 @@ def main():
 
                 img_w, img_h = image.size
                 prompt_text = build_fire_prompt(img_w, img_h)
-
-                # Encode image as base64 and build a data URL
                 b64_img = encode_image_to_base64(img_path)
                 data_url = f"data:image/jpeg;base64,{b64_img}"
 
-                # Message supports both 'parts' and 'content' to satisfy the chat template
                 msg = {
                     "role": "user",
                     "parts": [
                         {"text": prompt_text},
-                        {
-                            "inline_data": {
-                                "mime_type": "image/jpeg",
-                                "data": b64_img,
-                            }
-                        },
+                        {"inline_data": {"mime_type": "image/jpeg", "data": b64_img}},
                     ],
                     "content": [
                         {"type": "text", "text": prompt_text},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": data_url},
-                        },
+                        {"type": "image_url", "image_url": {"url": data_url}},
                     ],
                 }
 
                 messages_batch.append(msg)
-                meta_batch.append({"file": img_file})
+                # [MODIFIED] Store original image object in metadata so we can draw on it later
+                meta_batch.append({"file": img_file, "orig_image": image})
 
-            # if all images in this batch failed to load, skip
             if not messages_batch:
                 continue
 
-            # ---- Run batched inference ----
             start_t = time.perf_counter()
             try:
                 outputs = llm.chat(messages_batch, sampling_params)
@@ -258,9 +247,9 @@ def main():
             total_time += batch_time
             num_done += len(outputs)
 
-            # ---- Handle outputs for each image in the batch ----
             for meta, out in zip(meta_batch, outputs):
                 img_file = meta["file"]
+                # We use the first sample for drawing/saving
                 generated_text = out.outputs[0].text
 
                 result = extract_json_obj(generated_text)
@@ -276,14 +265,51 @@ def main():
 
                     fires = result.get("fires", [])
                     smoke = result.get("smoke", [])
-                    print(
-                        f"Number of fire bboxes: "
-                        f"{len(fires) if isinstance(fires, list) else 0}"
-                    )
-                    print(
-                        f"Number of smoke bboxes: "
-                        f"{len(smoke) if isinstance(smoke, list) else 0}"
-                    )
+                    print(f"Fire bboxes: {len(fires) if isinstance(fires, list) else 0}")
+                    print(f"Smoke bboxes: {len(smoke) if isinstance(smoke, list) else 0}")
+
+                    # ----------------------------------------------------
+                    # [ADDED] Draw and Save Image Logic
+                    # ----------------------------------------------------
+                    try:
+                        orig_image = meta["orig_image"]
+                        out_img = orig_image.copy()
+                        draw = ImageDraw.Draw(out_img)
+
+                        try:
+                            # Try to load a nice font, fallback to default
+                            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
+                        except OSError:
+                            font = ImageFont.load_default()
+
+                        # Draw Fire (Red)
+                        if isinstance(fires, list):
+                            for item in fires:
+                                # Handle both straight list [x,y,x,y] or dict wrapper {"bbox": ...}
+                                bbox = item.get("bbox") if isinstance(item, dict) else item
+                                if isinstance(bbox, list) and len(bbox) == 4:
+                                    draw.rectangle(bbox, outline="red", width=3)
+                                    draw.text((bbox[0], bbox[1]), "Fire", fill="red", font=font)
+
+                        # Draw Smoke (Blue)
+                        if isinstance(smoke, list):
+                            for item in smoke:
+                                bbox = item.get("bbox") if isinstance(item, dict) else item
+                                if isinstance(bbox, list) and len(bbox) == 4:
+                                    draw.rectangle(bbox, outline="blue", width=3)
+                                    draw.text((bbox[0], bbox[1]), "Smoke", fill="blue", font=font)
+
+                        # Save to OUT_IMAGE_DIR
+                        # Note: img_file usually includes extension (e.g. "test.jpg")
+                        out_name = f"{os.path.splitext(img_file)[0]}_vlm_output.jpg"
+                        out_path = os.path.join(OUT_IMAGE_DIR, out_name)
+                        out_img.save(out_path)
+                        print(f"Saved annotated image: {out_path}")
+
+                    except Exception as e:
+                        print(f"Error drawing/saving image for {img_file}: {e}")
+                    # ----------------------------------------------------
+
                 print("=====================================")
 
                 final_record = {
@@ -295,14 +321,10 @@ def main():
 
     if num_done > 0:
         avg_time = total_time / num_done
-        print(
-            f"\nAverage (approx) inference time per image: "
-            f"{avg_time:.3f} sec over {num_done} images"
-        )
-
+        print(f"\nAverage (approx) inference time: {avg_time:.3f} sec over {num_done} images")
+    
     print(f"Done! Results saved to {OUTPUT_FILE}")
-
-
+    print(f"Annotated images saved to {OUT_IMAGE_DIR}")
 
 if __name__ == "__main__":
     main()
